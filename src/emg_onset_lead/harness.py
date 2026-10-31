@@ -22,6 +22,7 @@ class TrialResult:
     lead_ms: float  # imu_onset - emg_onset
     margin_ms: float  # lead_ms - required latency
     true_lead_ms: float = NAN  # only when the source supplies meta["true_lead_ms"]
+    detect_lead_ms: float = NAN  # confirmation-time difference; diagnostic, not gated
 
 
 class Harness:
@@ -39,8 +40,9 @@ class Harness:
             es = NAN if e.onset_s is None else e.onset_s
             is_ = NAN if i.onset_s is None else i.onset_s
             lead = (is_ - es) * 1000.0
+            dl = NAN if e.detected_s is None or i.detected_s is None else (i.detected_s - e.detected_s) * 1e3
             out.append(TrialResult(t.subject_id, t.session_id, t.trial_id, es, is_, lead,
-                                   lead - req, float(t.meta.get("true_lead_ms", NAN))))
+                                   lead - req, float(t.meta.get("true_lead_ms", NAN)), dl))
         return out
 
     @staticmethod

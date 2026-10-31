@@ -19,6 +19,7 @@ class OnsetParams:
     settle_s: float = 0.2  # skip filter start-up transient inside the baseline window
     k: float = 5.0  # threshold = mean + k * SD of baseline feature
     hold_s: float = 0.025  # feature must stay beyond threshold this long
+    fit_s: float = 0.07  # live window for the onset back-dating line fit (same for EMG and angle)
 
 
 @dataclass(frozen=True)
@@ -55,6 +56,7 @@ class _StreamDetector:
     _mean: float | None = field(default=None, init=False)
     _thr: float = field(default=0.0, init=False)
     _run: int = field(default=0, init=False)
+    _tail: np.ndarray = field(default_factory=lambda: np.zeros(0), init=False)
     _hold_n: int = field(default=1, init=False)
     result: OnsetResult = field(default_factory=lambda: OnsetResult(None, None), init=False)
 
@@ -101,6 +103,10 @@ class _StreamDetector:
             if f.size == 0:
                 return self.result
         dev = f - self._mean
+        keep = max(3, round(self.params.fit_s * self.fs))
+        buf = np.concatenate([self._tail, np.abs(dev) if self.two_sided else dev])
+        n_tail = self._tail.size
+        self._tail = buf[-keep:]
         above = (np.abs(dev) if self.two_sided else dev) > self._thr
         idx = np.arange(f.size)
         last_false = np.maximum.accumulate(np.where(~above, idx, -1))
@@ -109,12 +115,28 @@ class _StreamDetector:
         hits = np.flatnonzero(run >= self._hold_n)
         if hits.size:
             j = int(hits[0])
-            self.result = OnsetResult(
-                (start + j - self._hold_n + 1) / self.fs, (start + j) / self.fs
-            )
+            window = buf[: n_tail + j + 1][-keep:]  # ends at the confirmation sample, never later
+            self.result = OnsetResult(self._backdate(window, start + j) / self.fs, (start + j) / self.fs)
         else:
             self._run = int(run[-1])
         return self.result
+
+    def _backdate(self, window: np.ndarray, confirm_idx: int) -> float:
+        """Signal-onset estimate at confirmation (uses only samples <= confirm_idx).
+
+        A threshold crossing lags the true onset by an amount that depends on rise speed and SNR,
+        and that differs between EMG and angle. Both paths therefore apply the same rule over the
+        same live window (``fit_s``): least-squares line through the last ``fit_s`` of the
+        baseline-standardised feature, extrapolated back to the baseline level. The reported
+        onset is that zero-crossing, not the threshold-crossing or the confirmation time.
+        """
+        w = window / (self._thr / self.params.k)
+        if w.size < 3:
+            return float(confirm_idx - self._hold_n + 1)
+        slope, icpt = np.polyfit(np.arange(w.size), w, 1)
+        if slope <= 0:
+            return float(confirm_idx - self._hold_n + 1)
+        return confirm_idx - (w.size - 1) - icpt / slope
 
     @classmethod
     def run(cls, x, fs: float, params=None, chunk: int | None = None) -> OnsetResult:

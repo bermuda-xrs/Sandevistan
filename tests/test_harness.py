@@ -54,15 +54,23 @@ def test_chunked_equals_oneshot(trials, chunk):
             assert cls.run(x, fs, p, chunk=chunk) == cls.run(x, fs, p)
 
 
-def test_recovers_known_lead():
-    res = Harness.run(SyntheticSource(n_subjects=6, n_sessions=3, n_trials=8, seed=1))
+def _errors(seed):
+    res = Harness.run(SyntheticSource(n_subjects=8, n_sessions=3, n_trials=5, seed=seed))
     lead = np.array([r.lead_ms for r in res])
-    true = np.array([r.true_lead_ms for r in res])
     assert not np.isnan(lead).any()
-    err = lead - true
-    # Causal filter delays leave a small positive bias (~10 ms); tolerance 15 ms mean, 8 ms SD.
-    assert abs(err.mean()) < 15
-    assert err.std() < 8
+    return lead - np.array([r.true_lead_ms for r in res])
+
+
+def test_recovers_known_lead():
+    errs = [_errors(seed) for seed in range(6)]
+    means = np.array([e.mean() for e in errs])
+    pooled = np.concatenate(errs)
+    assert abs(pooled.mean()) < 3.0  # pooled mean lead within +/-3 ms of ground truth
+    assert np.all(np.abs(means) < 3.0)  # and every seed individually
+    # no systematic sign bias: mean error is not significantly different from 0 ...
+    assert abs(pooled.mean()) / (pooled.std(ddof=1) / np.sqrt(pooled.size)) < 3.0
+    # ... and seeds are not all on one side
+    assert 0 < int((means > 0).sum()) < len(means)
 
 
 def _pooled(true_lead_ms):
@@ -71,9 +79,14 @@ def _pooled(true_lead_ms):
     return LeadStats.summarize(res, n_boot=200)
 
 
-def test_pass_fail_flips():
-    assert _pooled(40.0)["pass"] is False
-    assert _pooled(120.0)["pass"] is True
+@pytest.mark.parametrize(("true_lead", "expected"), [(40.0, False), (62.0, False), (120.0, True)])
+def test_pass_fail_flips(true_lead, expected):
+    # 62 ms is just below the 68.67 ms latency: a regression guard against measurement bias
+    # inflating the lead (it used to be ~+10 ms, enough to pass).
+    s = _pooled(true_lead)
+    assert s["pass"] is expected
+    if true_lead == 62.0:
+        assert s["pooled"]["lower_bound_ms"] < s["pooled"]["required_ms"]
 
 
 def test_latency_defaults():
