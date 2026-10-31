@@ -1,5 +1,4 @@
 # Plan: emg-onset-lead v1
-
 Measures lead = IMU/angle onset - EMG onset per trial; tests pooled one-sided lower bound > exo latency.
 
 ## Modules (src/emg_onset_lead/)
@@ -16,10 +15,8 @@ Measures lead = IMU/angle onset - EMG onset per trial; tests pooled one-sided lo
 - `stats.py` `LeadStats`: `t_lower_bound`, `boot_lower_bound`, `summarize(results, latency, conf)`.
 - `harness.py` `TrialResult`, `Harness.run(source, ...)`, `write_csv`, `write_summary`.
 - `cli.py` / `__main__.py`: argparse `run --synthetic`.
-
 ## Reuse (not reimplemented)
-scipy.signal `butter(output="sos")`, `sosfilt`, `sosfilt_zi`; `scipy.stats.t.ppf`;
-`numpy.random.default_rng`; csv/json from the stdlib.
+scipy.signal `butter(sos)`, `sosfilt`, `sosfilt_zi`; `scipy.stats.t.ppf`; numpy `default_rng`, `polyfit`; csv/json.
 ## Causality and reported quantity
 No filtfilt/zero-phase/centered windows. Baseline = first `baseline_s` (past only). A run above
 mean+k*SD held `hold_s` is *confirmed* at `detected_s`; at that instant only, the onset is back-dated:
