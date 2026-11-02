@@ -24,7 +24,10 @@ nothing, and that chunked == one-shot processing.
 
 EMG still line-fits the last `fit_s` (70 ms) of the baseline-standardised envelope and extrapolates
 to baseline. That line is computed at the hold, from samples at or before the hold only. A
-non-positive slope cannot be extrapolated; the detector then reports the threshold-crossing sample.
+slope whose rise across the window is below one part in a million of the feature level and of
+the threshold (a negative slope, or the ~1e-17 slope `polyfit` can return on a flat window)
+is not extrapolated; the detector then reports the threshold-crossing sample. The back-dated
+index stays inside the fit window and does not move earlier than the end of the 1.0 s baseline.
 
 The angle onset is not that line. A minimum-jerk flexion (Flash and Hogan 1985) leaves rest with
 zero acceleration, so velocity starts out curved and a short line reads the onset late (on the order

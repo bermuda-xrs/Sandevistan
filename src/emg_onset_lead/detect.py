@@ -305,21 +305,53 @@ class _StreamDetector:
             return
         self.result = OnsetResult(onset_s, detected_idx / self.fs, True)
 
+    # A fitted rise this small, relative to the feature level and the threshold, is
+    # numerical noise. ``polyfit`` on a flat window can return about +1e-17 instead of 0.
+    _MIN_RISE_FRAC = 1e-6
+
     def _backdate(self, window: np.ndarray, confirm_idx: int) -> float:
         """Line-fit onset in samples. Used for EMG, and as the IMU fallback.
 
         Least-squares line through the last ``fit_s`` of the baseline-standardised feature,
         extrapolated to the baseline level. Only samples at or before ``confirm_idx`` are in
-        ``window``. A non-positive slope cannot be extrapolated; the threshold-crossing sample
-        (the first sample of the hold) is reported instead.
+        ``window``. A slope whose rise across that window is below ``_MIN_RISE_FRAC`` of the
+        feature level and of the threshold — including a non-positive slope and a ~1 ulp fit
+        on a flat window — is not extrapolated. The threshold-crossing sample (the first
+        sample of the hold) is reported instead. The result stays inside the fit window, at
+        or after the baseline end, and at or before the confirm sample.
         """
-        w = window / (self._thr / self.params.k)
-        if w.size < 3:
-            return float(confirm_idx - self._hold_n + 1)
-        slope, icpt = np.polyfit(np.arange(w.size), w, 1)
-        if slope <= 0:
-            return float(confirm_idx - self._hold_n + 1)
-        return confirm_idx - (w.size - 1) - icpt / slope
+        fallback = float(confirm_idx - self._hold_n + 1)
+        w = np.asarray(window, dtype=float)
+        n = int(w.size)
+        scale = self._thr / self.params.k if self.params.k else self._thr
+        if n < 3 or not np.isfinite(scale) or scale <= 0:
+            return self._bound_onset(fallback, confirm_idx, max(n, 1))
+        w = w / scale
+        slope, icpt = np.polyfit(np.arange(n, dtype=float), w, 1)
+        level = max(float(np.max(np.abs(w))), float(self.params.k), 1e-12)
+        rise = slope * (n - 1)
+        if not np.isfinite(rise) or not np.isfinite(icpt) or rise <= self._MIN_RISE_FRAC * level:
+            return self._bound_onset(fallback, confirm_idx, n)
+        return self._bound_onset(float(confirm_idx - (n - 1) - icpt / slope), confirm_idx, n)
+
+    def _bound_onset(self, onset: float, confirm_idx: int, n: int) -> float:
+        """Clamp a back-dated sample so it cannot precede the fit window or the baseline.
+
+        The baseline floor is applied when the baseline ends at or before ``confirm_idx``.
+        When the confirm sample itself is still inside the baseline, the floor would sit
+        after the confirm sample, so only the fit window and the confirm sample bind.
+        """
+        window_start = float(confirm_idx - (n - 1))
+        lo = window_start
+        baseline_end = float(round(self.params.baseline_s * self.fs))
+        if baseline_end <= float(confirm_idx):
+            lo = max(lo, baseline_end)
+        hi = float(confirm_idx)
+        if lo > hi:
+            lo = hi
+        if not np.isfinite(onset):
+            return lo
+        return float(min(max(float(onset), lo), hi))
 
     @classmethod
     def run(cls, x, fs: float, params=None, chunk: int | None = None) -> OnsetResult:

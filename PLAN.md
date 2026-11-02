@@ -7,7 +7,9 @@ Measures lead = IMU/angle onset - EMG onset per trial; tests pooled one-sided lo
   `.required_ms(path, confirmation_delay_ms)` adds the delay only when `triggered` and path is total.
 - `detect.py` causal streaming detectors. `OnsetParams(baseline_s=1.0, settle_s, k, hold_s, fit_s, rest_ratio)`,
   `EmgParams`, `ImuParams(mode, refine_s=0.55)`, `OnsetResult(onset_s, detected_s, baseline_rest_ok)`.
-  EMG: line fit over `fit_s`, slope<=0 falls back to the threshold crossing. IMU: after the hold, fit
+  EMG: line fit over `fit_s`. A rise below 1e-6 of the feature level and the threshold
+  (so slope<=0, and a ~1e-17 fit on a flat window) falls back to the threshold crossing.
+  The onset stays inside the fit window and at or after the 1.0 s baseline. IMU: after the hold, fit
   minimum-jerk and critically damped families on the raw angle (`KinematicOnset`); line fit is the fallback.
   `BaselineRest` rejects a move inside the 1.0 s baseline.
 - `sources.py` `Trial`, `TrialSource`, `SyntheticSource` (critically damped), `MinJerkSource` (Flash & Hogan 1985).
