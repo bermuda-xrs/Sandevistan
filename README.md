@@ -6,31 +6,49 @@ exceeds the exo's intent-to-torque latency.
 
 - `lead_ms = imu_onset - emg_onset`
 - `margin_ms = lead_ms - required latency` (default 68.67 ms total = 18.67 ms IMU path + 50 ms EMG extra)
+- The 50 ms term is **t_win/2**, half of the controller's 100 ms EMG window.
+- The default gate is the **proportional** controller. `--triggered` (off unless you pass it) adds the measured EMG confirmation delay on top of 68.67 ms.
 
 ## Causality guarantee
 EMG and angle/IMU go through the same chunked pipeline: causal IIR filters (`scipy.signal.sosfilt`
-with carried state), a fixed past-only baseline window (first `baseline_s`), and a
-mean + k*SD threshold that must be held for `hold_s`. No `filtfilt`, no zero-phase, no centered
-windows. Onset is stamped at the first sample of the sustained run; it is *confirmed* `hold_s`
-later. Tests check that truncating at the confirmation sample gives the same onset, that
-truncating one sample earlier gives none, that corrupting future samples changes nothing, and that
-chunked == one-shot processing.
+with carried state), a fixed past-only baseline window (first `baseline_s` = **1.0 s**; the limb
+is required to be at rest in that window), and a mean + k*SD threshold that must be held for
+`hold_s`. No `filtfilt`, no zero-phase, no centered windows. A trial that moves inside the 1.0 s
+baseline (the excursion of the post-settle window exceeds 12 early-baseline SDs, or the onset
+would fall inside it) is rejected. Tests check that truncating at the commit sample gives the
+same onset, that truncating one sample earlier gives none, that corrupting future samples changes
+nothing, and that chunked == one-shot processing.
 
 ## What `lead_ms` is
-`lead_ms` is the **signal-onset lead**: the back-dated angle onset minus the back-dated EMG onset.
-A bare threshold crossing lags the true onset by a path-dependent amount (about +20 ms for the EMG
-envelope, +30 ms for angle velocity on the synthetic data), which inflated the lead by ~10 ms. At
-confirmation time both paths therefore apply the same rule over the same live window (`fit_s` = 70 ms,
-ending at the confirmation sample): fit a line to the baseline-standardised feature and extrapolate
-to the baseline level. This is still causal (nothing after confirmation is used). Signal-onset lead is
-the quantity comparable to the exo latency because the 68.67 ms budget already includes the EMG path's
-own processing/detection delay; detection-time lead would count that twice. `detect_lead_ms` (difference
-of confirmation times) is written as a diagnostic and is not gated.
+`lead_ms` is the **signal-onset lead**: the angle onset minus the EMG onset.
 
-Limitation: `fit_s` was chosen on the synthetic generator so that both paths' onset errors are near
-zero (synthetic recovery: pooled lead error within +/-3 ms, mixed sign across seeds). Real EMG/angle
-rise shapes differ, so the residual path bias on real data is unverified; check it before trusting a
-pass near the threshold. Absolute onsets are only meaningful to a few ms; the lead is the target.
+EMG still line-fits the last `fit_s` (70 ms) of the baseline-standardised envelope and extrapolates
+to baseline. That line is computed at the hold, from samples at or before the hold only. A
+non-positive slope cannot be extrapolated; the detector then reports the threshold-crossing sample.
+
+The angle onset is not that line. A minimum-jerk flexion (Flash and Hogan 1985) leaves rest with
+zero acceleration, so velocity starts out curved and a short line reads the onset late (on the order
+of +15 to +90 ms as the move gets slower, smaller, or noisier). After the velocity hold, the IMU
+detector waits `refine_s` (0.55 s) — still only samples already seen — and least-squares matches two
+rest-to-move families on that fixed window: minimum-jerk of free duration, and a critically damped
+step of free time constant. The better residual is the onset. The old critically damped generator is
+one of the two families, so it is not a separate tuning. If the fit does not beat a flat baseline,
+the line-fit fallback is used.
+
+Signal-onset lead is the quantity compared to the exo latency because the 68.67 ms budget already
+includes the EMG path's processing (`t_win/2`). `detect_lead_ms` (difference of commit times) is a
+diagnostic and is not gated. `emg_confirmation_delay_ms` is the EMG commit time minus the back-dated
+EMG onset (about 51 ms on the synthetic burst, not the 30 ms hold). It is always reported. It is
+added to the budget only when `LatencyConfig(triggered=True)`.
+
+The pass/fail gate is all of: the one-sided lower bound on subject means above the budget, the run
+having the planned 8 subjects x 3 sessions, and no more than 10% of trials missed. A 3x1 run fails.
+A run that misses 134 of 240 trials fails even if the detected trials look fine.
+
+Limitation: the kinematic onset was checked on synthetic minimum-jerk and critically damped moves
+only. It is **unverified on real motion** until it is compared to a recorded bench move with a known
+true onset. Do not treat a pass near the threshold as settled. The 8x3 plan is likewise unverified
+until real pilot variances exist (`SampleSize` takes those variances; it does not invent them).
 
 ## Run
 ```
@@ -38,20 +56,27 @@ pip install -e .[test]
 pytest
 python -m emg_onset_lead run --synthetic --subjects 8 --sessions 3 --seed 0 --out out/
 ```
-Writes `out/trials.csv` and `out/summary.json`.
+That command is a **single-seed demo**. Seed 0's subject-mean spread can be a couple of milliseconds
+against a design SD of about 8.91 ms (`SampleSize.design_subject_sd` with subject/session/trial SDs
+8/6/10 ms, 3 sessions, 10 trials). Pass `--seeds 6` to pool seeds 0..5. Writes `out/trials.csv` and
+`out/summary.json`.
 
 ## Output
 `trials.csv`: `subject_id, session_id, trial_id, emg_onset_s, imu_onset_s, lead_ms, margin_ms,
-true_lead_ms, detect_lead_ms` (`true_lead_ms` is NaN unless the source provides
-`meta["true_lead_ms"]`).
+true_lead_ms, detect_lead_ms, emg_confirmation_delay_ms, baseline_rest_ok`
+(`true_lead_ms` is NaN unless the source provides `meta["true_lead_ms"]`). A rejected baseline
+has `baseline_rest_ok` false and a NaN lead.
 
-`summary.json`: `latency`, `study` (planned 8 subjects x 3 sessions over >= 3 days, electrodes
-re-donned; actual shape), `sessions[]`, `subjects[]`, `pooled`, `pass`. Each level has
-`mean_lead_ms`, one-sided `lower_bound_ms` (default 95%), `required_ms`, `margin_ms`, `pass`
-(lower bound > required latency). Pooled is the mean of subject means with a t-bound on subject
-means (gating); `bootstrap_lower_bound_ms` is a seeded cluster bootstrap over subjects/sessions
-(reported only). See `PLAN.md`.
+`summary.json`: `latency` (including `triggered` and whether the 50 ms term is t_win/2),
+`confirmation_delay_ms` (mean, min, max), `study` (planned 8x3 over >= 3 days, electrodes
+re-donned; `plan_status` is `unverified` until real pilot variance exists; actual shape),
+`gates` (lower bound, planned shape, missed-trial fraction), `sessions[]`, `subjects[]`, `pooled`,
+`pass`. `pass` requires the lower bound, the 8x3 shape, and a miss fraction at or below 10%.
+Pooled is the mean of subject means with a t-bound on subject means; `bootstrap_lower_bound_ms`
+is a seeded cluster bootstrap (reported only). See `PLAN.md`. The CLI adds `demo.single_seed`.
 
 ## Data
-Only synthetic data is used. Meta EMG datasets are excluded for licensing; no external data has
-been cleared yet. To add a source, implement `TrialSource` (`__iter__` yielding `Trial`).
+Only synthetic data is used. `SyntheticSource` is a critically damped 60 deg step (nonzero
+acceleration at onset). `MinJerkSource` is the Flash and Hogan minimum-jerk path (duration and
+amplitude set per trial). Meta EMG datasets are excluded for licensing; no external data has been
+cleared yet. To add a source, implement `TrialSource` (`__iter__` yielding `Trial`).
