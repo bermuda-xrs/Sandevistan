@@ -1,0 +1,17 @@
+@import "./theme/tokens.css";
+
+html,
+body,
+#root,
+.stage {
+  margin: 0;
+  height: 100%;
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-body);
+  font-size: var(--font-size-body);
+}
+
+html {
+  color-scheme: dark;
+}

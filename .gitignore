@@ -4,3 +4,10 @@ __pycache__/
 .pytest_cache/
 out/
 *.egg-info/
+
+node_modules
+dist
+dist-ssr
+*.local
+.vercel
+.oxlintcache

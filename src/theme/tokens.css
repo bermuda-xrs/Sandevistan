@@ -1,0 +1,9 @@
+:root {
+  --color-bg: #0e0e10;
+  --color-fg: #d4dbe1;
+  --color-accent: #d40000;
+  --color-grid: color-mix(in srgb, #d4dbe1 18%, transparent);
+  --font-body: "Pretendard Variable", Pretendard, system-ui, sans-serif;
+  --font-size-body: 24px;
+  --font-size-formula: 32px;
+}
