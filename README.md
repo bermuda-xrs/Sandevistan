@@ -45,19 +45,26 @@ EMG onset (about 51 ms on the synthetic burst, not the 30 ms hold). It is always
 added to the budget only when `LatencyConfig(triggered=True)`.
 
 The pass/fail gate is all of: the one-sided lower bound on subject means above the budget, the run
-having the planned 8 subjects x 3 sessions, and no more than 10% of trials missed. A 3x1 run fails.
-A run that misses 134 of 240 trials fails even if the detected trials look fine.
+having the planned 16 subjects x 3 sessions (`PLANNED_SHAPE` in `stats.py`), and no more than 10% of trials
+missed. A 3x1 run and the old 8x3 plan both fail. A run that misses 268 of 480 trials fails even if the
+detected trials look fine. The pilot is 16x3 since 2026-11-03: 8x3 was rejected at about 53% power, and the
+adopted power calculation assumed 3 sessions per subject.
 
 Limitation: the kinematic onset was checked on synthetic minimum-jerk and critically damped moves
 only. It is **unverified on real motion** until it is compared to a recorded bench move with a known
-true onset. Do not treat a pass near the threshold as settled. The 8x3 plan is likewise unverified
+true onset. Do not treat a pass near the threshold as settled. The 16x3 plan is likewise unverified
 until real pilot variances exist (`SampleSize` takes those variances; it does not invent them).
+
+Status: **Fact Checker round 2 failed (2026-11-11).** On out-of-family motion the onset error ran from
+49 ms early to 271 ms late, and the EMG onset showed a sign bias of about +/-11 ms, which is over the
+6 ms margin. The detectors here are not validated for real EMG or real motion, and the synthetic
+bias tests do not show otherwise.
 
 ## Run
 ```
 pip install -e .[test]
 pytest
-python -m emg_onset_lead run --synthetic --subjects 8 --sessions 3 --seed 0 --out out/
+python -m emg_onset_lead run --synthetic --subjects 16 --sessions 3 --seed 0 --out out/
 ```
 That command is a **single-seed demo**. Seed 0's subject-mean spread can be a couple of milliseconds
 against a design SD of about 8.91 ms (`SampleSize.design_subject_sd` with subject/session/trial SDs
@@ -71,10 +78,10 @@ true_lead_ms, detect_lead_ms, emg_confirmation_delay_ms, baseline_rest_ok`
 has `baseline_rest_ok` false and a NaN lead.
 
 `summary.json`: `latency` (including `triggered` and whether the 50 ms term is t_win/2),
-`confirmation_delay_ms` (mean, min, max), `study` (planned 8x3 over >= 3 days, electrodes
+`confirmation_delay_ms` (mean, min, max), `study` (planned 16x3 over >= 3 days, electrodes
 re-donned; `plan_status` is `unverified` until real pilot variance exists; actual shape),
 `gates` (lower bound, planned shape, missed-trial fraction), `sessions[]`, `subjects[]`, `pooled`,
-`pass`. `pass` requires the lower bound, the 8x3 shape, and a miss fraction at or below 10%.
+`pass`. `pass` requires the lower bound, the 16x3 shape, and a miss fraction at or below 10%.
 Pooled is the mean of subject means with a t-bound on subject means; `bootstrap_lower_bound_ms`
 is a seeded cluster bootstrap (reported only). See `PLAN.md`. The CLI adds `demo.single_seed`.
 

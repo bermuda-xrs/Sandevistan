@@ -14,7 +14,7 @@ Measures lead = IMU/angle onset - EMG onset per trial; tests pooled one-sided lo
   `BaselineRest` rejects a move inside the 1.0 s baseline.
 - `sources.py` `Trial`, `TrialSource`, `SyntheticSource` (critically damped), `MinJerkSource` (Flash & Hogan 1985).
 - `stats.py` `LeadStats` (t bound, cluster bootstrap, summarize) and `SampleSize` (power / required N from
-  pilot between- and within-subject variance). 8x3 is `plan_status: unverified` until real variances exist.
+  pilot between- and within-subject variance). 16x3 is `plan_status: unverified` until real variances exist.
 - `harness.py` `TrialResult` (includes confirmation delay and baseline flag), `Harness.run`.
 - `cli.py`: `run --synthetic`. Default output is a single seed. `--seeds N` pools 0..N-1. `--triggered` opts in.
 ## Reuse (not reimplemented)
@@ -25,11 +25,13 @@ hold. IMU commits `refine_s` later, still using only samples up to that index. T
 one sample earlier does not.
 ## Gate
 Pass iff lower bound > required (68.67 proportional, or 68.67 + measured EMG confirmation delay if triggered),
-the run is 8 subjects x 3 sessions, and missed trials are at most 10% (134/240 fails). Confirmation delay is
+the run is 16 subjects x 3 sessions (`PLANNED_SHAPE`; 8x3 was rejected at ~53% power, 2026-11-03), and
+missed trials are at most 10% (268/480 fails). Confirmation delay is
 reported either way (synthetic bursts land near 51 ms, not the 30 ms hold).
 ## Statistics
 Subject > session > trial. Pooled gate: mean of subject means, one-sided t (df = n_subjects-1). Cluster
 bootstrap is reported, not gated. `SampleSize.power` / `required_subjects` take pilot variances, margin, alpha.
 ## Known limits
 Kinematic onset is synthetic-only. Unverified on real motion until a bench move with a known true onset.
-8x3 power is unverified until those pilot variances are real. A single demo seed is not the 8.91 ms design SD.
+16x3 power is unverified until those pilot variances are real.
+Fact Checker round 2 FAILED 2026-11-11: out-of-family motion 49 ms early to 271 ms late, EMG sign bias ~±11 ms (> 6 ms margin). A single demo seed is not the 8.91 ms design SD.
