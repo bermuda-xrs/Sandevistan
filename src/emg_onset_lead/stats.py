@@ -5,6 +5,12 @@ from scipy import stats as sps
 
 from .latency import LatencyConfig
 
+# Planned onset pilot: 16 subjects x 3 sessions per subject (decided 2026-11-03; 8x3 was
+# rejected at about 53% power). The adopted power calculation assumed 3 sessions per subject.
+PLANNED_SUBJECTS = 16
+PLANNED_SESSIONS = 3
+PLANNED_SHAPE = (PLANNED_SUBJECTS, PLANNED_SESSIONS)
+
 
 class SampleSize:
     """One-sided t power for a subject-mean lead.
@@ -14,7 +20,7 @@ class SampleSize:
     The variance of a subject mean is ``between_var + within_var / n_per_subject``.
     The test is the same one the harness gates on: subject means versus a margin above
     the latency budget. Inputs are pilot variances; nothing here is estimated from the
-    synthetic generator, and the planned 8x3 is unverified until those come from real data.
+    synthetic generator, and the planned 16x3 is unverified until those come from real data.
     """
 
     @staticmethod
@@ -103,7 +109,7 @@ class LeadStats:
     @staticmethod
     def summarize(results, latency: LatencyConfig = LatencyConfig(), conf: float = 0.95,
                   path: str = "total", n_boot: int = 2000, seed: int = 0,
-                  planned: tuple[int, int] = (8, 3), max_missed_fraction: float = 0.10) -> dict:
+                  planned: tuple[int, int] = PLANNED_SHAPE, max_missed_fraction: float = 0.10) -> dict:
         delays = [float(r.emg_confirmation_delay_ms) for r in results
                   if np.isfinite(getattr(r, "emg_confirmation_delay_ms", np.nan))]
         delay_mean = float(np.mean(delays)) if delays else 0.0
@@ -164,7 +170,7 @@ class LeadStats:
         shape_ok = (len(nested) == planned[0] and bool(sess_counts)
                     and all(c == planned[1] for c in sess_counts))
         # 134/240 missed is 0.56 and must fail. A lower-bound pass on the trials that
-        # happened to detect is not enough, and neither is a study that is not 8x3.
+        # happened to detect is not enough, and neither is a study that is not the planned shape.
         miss_ok = bool(n_total) and miss_fraction <= max_missed_fraction
         bound_ok = bool(pooled["pass"])
         passed = bool(bound_ok and shape_ok and miss_ok)
@@ -186,8 +192,8 @@ class LeadStats:
                           "matches_planned_shape": shape_ok,
                           "plan_status": "unverified",
                           "plan_note": (
-                              "8 subjects x 3 sessions is unverified until real data supply "
-                              "between-subject and within-subject variance. Use SampleSize with "
+                              f"{planned[0]} subjects x {planned[1]} sessions is unverified until real data "
+                              "supply between-subject and within-subject variance. Use SampleSize with "
                               "those pilot variances; synthetic power is not a substitute."
                           )},
                 "gates": {"lower_bound": bound_ok, "planned_shape": shape_ok,

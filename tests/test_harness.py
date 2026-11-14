@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 
 from emg_onset_lead import (
+    PLANNED_SHAPE,
     EmgOnsetDetector,
     Harness,
     ImuOnsetDetector,
@@ -77,7 +78,8 @@ def test_recovers_known_lead():
 
 
 def _pooled(true_lead_ms):
-    res = Harness.run(SyntheticSource(n_subjects=8, n_sessions=3, n_trials=4, seed=0,
+    n_subj, n_sess = PLANNED_SHAPE
+    res = Harness.run(SyntheticSource(n_subjects=n_subj, n_sessions=n_sess, n_trials=4, seed=0,
                                       true_lead_ms=true_lead_ms))
     return LeadStats.summarize(res, n_boot=200)
 
@@ -122,7 +124,7 @@ def test_bootstrap_reproducible_and_nested():
 
 def test_summary_shape_and_levels():
     s = _pooled(80.0)
-    assert len(s["sessions"]) == 24 and len(s["subjects"]) == 8
+    assert len(s["sessions"]) == 48 and len(s["subjects"]) == 16
     assert s["study"]["matches_planned_shape"] is True
     assert s["pooled"]["bootstrap_lower_bound_ms"] is not None
     assert s["pooled"]["lower_bound_ms"] < s["pooled"]["mean_lead_ms"]
@@ -252,14 +254,45 @@ def test_three_by_one_fails_shape_gate():
 
 
 def test_max_missed_trials_fails():
-    # 8 x 3 x 10 = 240 trials, 134 missed. The trials that detected would clear 68.67 ms.
-    s = LeadStats.summarize(_manual_rows(8, 3, 10, lead=120.0, n_miss=134), n_boot=20)
-    assert s["pooled"]["n_total"] == 240
-    assert s["pooled"]["n_missed"] == 134
+    # 16 x 3 x 10 = 480 trials, 268 missed (0.56 missed).
+    # The trials that detected would clear 68.67 ms.
+    s = LeadStats.summarize(_manual_rows(16, 3, 10, lead=120.0, n_miss=268), n_boot=20)
+    assert s["pooled"]["n_total"] == 480
+    assert s["pooled"]["n_missed"] == 268
     assert s["gates"]["lower_bound"] is True
     assert s["gates"]["missed_trials"] is False
     assert s["gates"]["planned_shape"] is True
     assert s["pass"] is False
+
+
+def test_planned_shape_is_16_by_3():
+    assert PLANNED_SHAPE == (16, 3)
+    assert SyntheticSource().n_subjects == 16 and SyntheticSource().n_sessions == 3
+
+
+def test_gate_accepts_16x3():
+    s = LeadStats.summarize(_manual_rows(16, 3, 4, lead=120.0), n_boot=20)
+    assert s["study"]["matches_planned_shape"] is True
+    assert s["study"]["planned"]["subjects"] == 16
+    assert s["study"]["planned"]["sessions_per_subject"] == 3
+    assert s["gates"]["planned_shape"] is True
+    assert s["pass"] is True
+
+
+@pytest.mark.parametrize(("n_subj", "n_sess"), [(8, 3), (16, 2), (16, 4), (15, 3), (17, 3), (8, 6), (3, 1)])
+def test_gate_rejects_wrong_shapes(n_subj, n_sess):
+    s = LeadStats.summarize(_manual_rows(n_subj, n_sess, 4, lead=120.0), n_boot=20)
+    assert s["gates"]["lower_bound"] is True
+    assert s["gates"]["planned_shape"] is False
+    assert s["study"]["matches_planned_shape"] is False
+    assert s["pass"] is False
+
+
+def test_gate_rejects_uneven_sessions():
+    rows = _manual_rows(16, 3, 4, lead=120.0)
+    rows = [r for r in rows if not (r.subject_id == "S00" and r.session_id.endswith("D3"))]
+    s = LeadStats.summarize(rows, n_boot=20)
+    assert s["gates"]["planned_shape"] is False and s["pass"] is False
 
 
 @pytest.mark.parametrize("t_move", [0.6, 0.9])
@@ -294,13 +327,15 @@ def test_triggered_mode_adds_confirmation_delay():
 
 
 def test_sample_size_helper_and_unverified_plan():
-    # Pilot variances that make the synthetic 8x3 design ~50% power at budget + 6 ms.
+    # Pilot variances that make the rejected 8x3 design ~50% power at budget + 6 ms.
     # between: subject sd 8 ms. within: a session mean, sd 6 ms plus 10 trials of sd 10 ms.
     power = SampleSize.power(between_var=64.0, within_var=46.0, effect_margin=6.0,
                              alpha=0.05, n_subjects=8, n_per_subject=3)
     assert power == pytest.approx(0.50, abs=0.03)
     needed = SampleSize.required_subjects(64.0, 46.0, 6.0, 0.05, 0.80, n_per_subject=3)
     assert needed is not None and needed > 8
+    # The adopted 16 x 3 design clears 80% power at the same variances.
+    assert SampleSize.power(64.0, 46.0, 6.0, 0.05, 16, 3) >= 0.80
     assert SampleSize.design_subject_sd(8.0, 6.0, 10.0, 3, 10) == pytest.approx(8.91, abs=0.01)
     plan = _pooled(80.0)
     assert plan["study"]["plan_status"] == "unverified"

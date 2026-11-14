@@ -8,7 +8,7 @@ from pathlib import Path
 from .harness import Harness
 from .latency import LatencyConfig
 from .sources import SyntheticSource
-from .stats import LeadStats, SampleSize
+from .stats import PLANNED_SESSIONS, PLANNED_SUBJECTS, LeadStats, SampleSize
 
 
 def main(argv=None) -> int:
@@ -16,8 +16,8 @@ def main(argv=None) -> int:
     sub = p.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run", help="run the onset-lead analysis")
     r.add_argument("--synthetic", action="store_true", help="use the synthetic source (only one shipped)")
-    r.add_argument("--subjects", type=int, default=8)
-    r.add_argument("--sessions", type=int, default=3)
+    r.add_argument("--subjects", type=int, default=PLANNED_SUBJECTS)
+    r.add_argument("--sessions", type=int, default=PLANNED_SESSIONS)
     r.add_argument("--trials", type=int, default=10, help="trials per session")
     r.add_argument("--seed", type=int, default=0)
     r.add_argument("--seeds", type=int, default=None,
@@ -55,10 +55,11 @@ def main(argv=None) -> int:
         "design_subject_sd_ms": design_sd,
         "note": (
             "Single-seed demo. The subject-mean SD is one draw; under the synthetic variances "
-            f"it is expected to be {design_sd:.2f} ms (8x3x10), not whatever this seed happened to show."
+            f"it is expected to be {design_sd:.2f} ms ({PLANNED_SUBJECTS}x{PLANNED_SESSIONS}x10), "
+            "not whatever this seed happened to show."
             if len(seeds) == 1 else
             f"Pooled across seeds {seeds[0]}..{seeds[-1]}. Subject ids are suffixed, so this cohort "
-            "is not the planned 8x3 and the shape gate does not pass."
+            f"is not the planned {PLANNED_SUBJECTS}x{PLANNED_SESSIONS} and the shape gate does not pass."
         ),
     }
     a.out.mkdir(parents=True, exist_ok=True)

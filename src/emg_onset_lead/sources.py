@@ -6,6 +6,8 @@ from typing import Protocol, runtime_checkable
 
 import numpy as np
 
+from .stats import PLANNED_SESSIONS, PLANNED_SUBJECTS
+
 
 @dataclass(frozen=True)
 class Trial:
@@ -33,8 +35,8 @@ class SyntheticSource:
     Session offsets stand in for electrode re-donning between days.
     """
 
-    n_subjects: int = 8
-    n_sessions: int = 3
+    n_subjects: int = PLANNED_SUBJECTS
+    n_sessions: int = PLANNED_SESSIONS
     n_trials: int = 10
     true_lead_ms: float = 80.0
     subject_sd_ms: float = 8.0

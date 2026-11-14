@@ -4,10 +4,10 @@ from .detect import EmgOnsetDetector, EmgParams, ImuOnsetDetector, ImuParams, On
 from .harness import Harness, TrialResult
 from .latency import LatencyConfig
 from .sources import MinJerkSource, SyntheticSource, Trial, TrialSource
-from .stats import LeadStats, SampleSize
+from .stats import PLANNED_SHAPE, LeadStats, SampleSize
 
 __all__ = [
     "EmgOnsetDetector", "EmgParams", "ImuOnsetDetector", "ImuParams", "OnsetResult",
     "Harness", "TrialResult", "LatencyConfig", "SyntheticSource", "MinJerkSource",
-    "Trial", "TrialSource", "LeadStats", "SampleSize",
+    "Trial", "TrialSource", "LeadStats", "SampleSize", "PLANNED_SHAPE",
 ]
