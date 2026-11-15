@@ -60,3 +60,29 @@ def test_emg_onset_error_within_margin(rise_s, snr):
     assert missed <= MAX_MISS * n_per_cell(snr)
     m, lo, hi = mean_ci(errs)
     assert -MARGIN_MS < lo and hi < MARGIN_MS, f"mean {m:.2f} ms, 95% CI [{lo:.2f}, {hi:.2f}]"
+
+
+def smoothstep_cell(rise_s, snr, n=80, seed=SEED):
+    """Same as ``grid_cell`` but the amplitude follows SyntheticSource's smoothstep 3r^2 - 2r^3."""
+    rng = np.random.default_rng([seed, 99, RISES_S.index(rise_s), SNRS.index(snr)])
+    errs = []
+    for _ in range(n):
+        te_on = rng.uniform(1.5, 2.5)
+        t = np.arange(int(4 * 2000.0)) / 2000.0
+        r = np.clip((t - te_on) / rise_s, 0, 1)
+        emg = (1 + (snr - 1) * (3 * r**2 - 2 * r**3)) * rng.normal(0, 1, t.size)
+        a = EmgOnsetDetector.run(emg, 2000.0, EmgParams(), chunk=100)
+        if a.onset_s is not None:
+            errs.append((a.onset_s - te_on) * 1e3)
+    return np.array(errs)
+
+
+@pytest.mark.parametrize("rise_s", [
+    pytest.param(r, marks=pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
+        f"Known gap: the EMG onset model is a linear amplitude ramp. A smoothstep (S-curve) "
+        f"burst of {r * 1e3:.0f} ms reads late by ~10% of its rise (synthetic).")))
+    for r in (0.08, 0.15)
+])
+def test_emg_onset_smoothstep_burst(rise_s):
+    m, lo, hi = mean_ci(smoothstep_cell(rise_s, 15.0))
+    assert -MARGIN_MS < lo and hi < MARGIN_MS, f"mean {m:.2f} ms, 95% CI [{lo:.2f}, {hi:.2f}]"
