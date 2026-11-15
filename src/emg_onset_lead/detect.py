@@ -24,7 +24,7 @@ class OnsetParams:
     baseline_s: float = 1.0  # fixed calibration window at trial start; the limb must be at rest
     settle_s: float = 0.2  # skip filter start-up transient inside the baseline window
     k: float = 5.0  # threshold = mean + k * SD of baseline feature
-    hold_s: float = 0.025  # feature must stay beyond threshold this long
+    hold_s: float = 0.03  # feature must stay beyond threshold this long (30 ms, outside the latency budget)
     fit_s: float = 0.07  # live window for the line-fit fallback (EMG, and IMU if the kinematic fit fails)
     # Not at rest when the peak excursion exceeds this many early-baseline SDs.
     # 12 clears the EMG envelope at rest (observed up to ~10) and still flags a
@@ -82,7 +82,8 @@ class BaselineRest:
         return float(np.max(np.abs(seg - np.median(early))) / sd)
 
     @staticmethod
-    def at_rest(x, fs: float, settle_s: float, baseline_s: float, max_ratio: float = 6.0) -> bool:
+    def at_rest(x, fs: float, settle_s: float, baseline_s: float,
+                max_ratio: float = OnsetParams.rest_ratio) -> bool:
         return BaselineRest.excursion_ratio(x, fs, settle_s, baseline_s) <= max_ratio
 
 
