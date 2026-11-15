@@ -6,7 +6,8 @@ from scipy import stats as sps
 from .latency import LatencyConfig
 
 # Planned onset pilot: 16 subjects x 3 sessions per subject (decided 2026-11-03; 8x3 was
-# rejected at about 53% power). The adopted power calculation assumed 3 sessions per subject.
+# rejected at about 53% power, computed from synthetic variances, subject/session/trial SD
+# 8/6/10 ms, not pilot data). The adopted power calculation assumed 3 sessions per subject.
 PLANNED_SUBJECTS = 16
 PLANNED_SESSIONS = 3
 PLANNED_SHAPE = (PLANNED_SUBJECTS, PLANNED_SESSIONS)
