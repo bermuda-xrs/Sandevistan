@@ -47,7 +47,8 @@ added to the budget only when `LatencyConfig(triggered=True)`.
 The pass/fail gate is all of: the one-sided lower bound on subject means above the budget, the run
 having the planned 16 subjects x 3 sessions (`PLANNED_SHAPE` in `stats.py`), and no more than 10% of trials
 missed. A 3x1 run and the old 8x3 plan both fail. A run that misses 268 of 480 trials fails even if the
-detected trials look fine. The pilot is 16x3 since 2026-11-03: 8x3 was rejected at about 53% power, and the
+detected trials look fine. The pilot is 16x3 since 2026-11-03: 8x3 was rejected at about 53% power (computed
+from synthetic variances, subject/session/trial SD 8/6/10 ms, not pilot data), and the
 adopted power calculation assumed 3 sessions per subject.
 
 Limitation: the kinematic onset was checked on synthetic minimum-jerk and critically damped moves

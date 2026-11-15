@@ -366,14 +366,15 @@ def test_triggered_mode_adds_confirmation_delay():
 
 
 def test_sample_size_helper_and_unverified_plan():
-    # Pilot variances that make the rejected 8x3 design ~50% power at budget + 6 ms.
+    # Synthetic variances (subject/session/trial SD 8/6/10 ms), not pilot data. They were chosen
+    # so the rejected 8x3 design comes out near 50% power at budget + 6 ms.
     # between: subject sd 8 ms. within: a session mean, sd 6 ms plus 10 trials of sd 10 ms.
     power = SampleSize.power(between_var=64.0, within_var=46.0, effect_margin=6.0,
                              alpha=0.05, n_subjects=8, n_per_subject=3)
     assert power == pytest.approx(0.50, abs=0.03)
     needed = SampleSize.required_subjects(64.0, 46.0, 6.0, 0.05, 0.80, n_per_subject=3)
     assert needed is not None and needed > 8
-    # The adopted 16 x 3 design clears 80% power at the same variances.
+    # At the same synthetic variances 16 x 3 clears 80%. Illustration only, not evidence for 16.
     assert SampleSize.power(64.0, 46.0, 6.0, 0.05, 16, 3) >= 0.80
     assert SampleSize.design_subject_sd(8.0, 6.0, 10.0, 3, 10) == pytest.approx(8.91, abs=0.01)
     plan = _pooled(80.0)
