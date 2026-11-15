@@ -117,8 +117,12 @@ class LeadStats:
         nested: dict[str, dict[str, np.ndarray]] = {}
         missed: dict[tuple[str, str], int] = {}
         trues: dict[tuple[str, str], list[float]] = {}
+        # Study shape comes from the input trials (detected or not), so a fully missed
+        # subject or session still counts against the planned shape.
+        input_sessions: dict[str, set[str]] = {}
         for r in results:
             key = (r.subject_id, r.session_id)
+            input_sessions.setdefault(r.subject_id, set()).add(r.session_id)
             nested.setdefault(r.subject_id, {}).setdefault(r.session_id, [])
             if np.isfinite(r.lead_ms):
                 nested[r.subject_id][r.session_id].append(r.lead_ms)
@@ -166,8 +170,8 @@ class LeadStats:
         all_true = [x for v in trues.values() for x in v]
         if all_true:
             pooled["true_lead_ms_mean"] = float(np.mean(all_true))
-        sess_counts = [len(v) for v in nested.values()]
-        shape_ok = (len(nested) == planned[0] and bool(sess_counts)
+        sess_counts = [len(v) for v in input_sessions.values()]
+        shape_ok = (len(input_sessions) == planned[0] and bool(sess_counts)
                     and all(c == planned[1] for c in sess_counts))
         # 134/240 missed is 0.56 and must fail. A lower-bound pass on the trials that
         # happened to detect is not enough, and neither is a study that is not the planned shape.
@@ -187,7 +191,7 @@ class LeadStats:
                 "confirmation_delay_ms": delay_report,
                 "study": {"planned": {"subjects": planned[0], "sessions_per_subject": planned[1],
                                       "min_days": 3, "electrodes_redonned_between_sessions": True},
-                          "actual": {"subjects": len(nested),
+                          "actual": {"subjects": len(input_sessions),
                                      "sessions_per_subject_max": max(sess_counts, default=0)},
                           "matches_planned_shape": shape_ok,
                           "plan_status": "unverified",

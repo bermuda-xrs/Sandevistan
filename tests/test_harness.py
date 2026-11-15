@@ -1,5 +1,6 @@
 import json
 import math
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -291,6 +292,39 @@ def test_gate_rejects_wrong_shapes(n_subj, n_sess):
     assert s["gates"]["planned_shape"] is False
     assert s["study"]["matches_planned_shape"] is False
     assert s["pass"] is False
+
+
+def _all_missed(rows, pred):
+    """Mark every trial matching ``pred`` as missed (no detection, NaN lead)."""
+    nan = float("nan")
+    return [replace(r, emg_onset_s=nan, imu_onset_s=nan, lead_ms=nan, margin_ms=nan)
+            if pred(r) else r for r in rows]
+
+
+def test_shape_counts_fully_missed_subject():
+    # 17x3 where one whole subject missed: still 17 subjects, not 16.
+    rows = _all_missed(_manual_rows(17, 3, 10, lead=120.0), lambda r: r.subject_id == "S16")
+    s = LeadStats.summarize(rows, n_boot=20)
+    assert s["study"]["actual"]["subjects"] == 17
+    assert s["gates"]["planned_shape"] is False and s["pass"] is False
+
+
+def test_shape_counts_extra_subject_with_missed_session():
+    # 16x3 plus a 17th subject whose only session missed every trial.
+    extra = _all_missed(_manual_rows(17, 1, 10, lead=120.0)[160:], lambda r: True)
+    assert {r.subject_id for r in extra} == {"S16"}
+    rows = _manual_rows(16, 3, 10, lead=120.0) + extra
+    s = LeadStats.summarize(rows, n_boot=20)
+    assert s["gates"]["missed_trials"] is True  # 10/490 is under the cap; shape alone must fail
+    assert s["gates"]["planned_shape"] is False and s["pass"] is False
+
+
+def test_shape_counts_fully_missed_sessions():
+    # 16x4 where every subject's 4th session missed: still 4 sessions per subject.
+    rows = _all_missed(_manual_rows(16, 4, 10, lead=120.0), lambda r: r.session_id.endswith("D4"))
+    s = LeadStats.summarize(rows, n_boot=20)
+    assert s["study"]["actual"]["sessions_per_subject_max"] == 4
+    assert s["gates"]["planned_shape"] is False and s["pass"] is False
 
 
 def test_gate_rejects_uneven_sessions():
