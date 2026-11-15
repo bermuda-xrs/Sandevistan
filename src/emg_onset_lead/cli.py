@@ -48,14 +48,15 @@ def main(argv=None) -> int:
                             session_id=f"{row.session_id}-seed{seed}") for row in part]
         results.extend(part)
     summary = LeadStats.summarize(results, lat, a.confidence, seed=seeds[0])
-    design_sd = SampleSize.design_subject_sd(8.0, 6.0, 10.0, 3, 10)
+    design_sd = SampleSize.design_subject_sd(8.0, 6.0, 10.0, PLANNED_SESSIONS, 10)
     summary["demo"] = {
         "single_seed": len(seeds) == 1,
         "seeds": seeds,
         "design_subject_sd_ms": design_sd,
         "note": (
             "Single-seed demo. The subject-mean SD is one draw; under the synthetic variances "
-            f"it is expected to be {design_sd:.2f} ms ({PLANNED_SUBJECTS}x{PLANNED_SESSIONS}x10), "
+            f"it is expected to be {design_sd:.2f} ms (subject/session/trial SDs 8/6/10 ms, "
+            f"{PLANNED_SESSIONS} sessions x 10 trials per subject), "
             "not whatever this seed happened to show."
             if len(seeds) == 1 else
             f"Pooled across seeds {seeds[0]}..{seeds[-1]}. Subject ids are suffixed, so this cohort "

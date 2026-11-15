@@ -192,7 +192,12 @@ def _lead_errors(src):
     ("cd", 0.5, 60.0, 1.0),
 ])
 def test_lead_unbiased_across_motion(kind, move_s, amp, noise):
-    """Duration 0.3/0.5/1.0 s, 10 deg to large, IMU noise to 1 deg, and the old shape."""
+    """Duration 0.3/0.5/1.0 s, 10 deg to large, IMU noise to 1 deg, and the old shape.
+
+    Covers only the in-family minimum-jerk and critically damped synthetic sweep. It does not
+    show unbiasedness on out-of-family or real motion (Fact Checker round 2 found onset errors
+    from 49 ms early to 271 ms late out of family).
+    """
     means = []
     for seed in range(4):
         common = dict(n_subjects=3, n_sessions=2, n_trials=4, seed=seed,
