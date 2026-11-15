@@ -13,7 +13,7 @@ exceeds the exo's intent-to-torque latency.
 EMG and angle/IMU go through the same chunked pipeline: causal IIR filters (`scipy.signal.sosfilt`
 with carried state), a fixed past-only baseline window (first `baseline_s` = **1.0 s**; the limb
 is required to be at rest in that window), and a mean + k*SD threshold that must be held for
-`hold_s`. No `filtfilt`, no zero-phase, no centered windows. A trial that moves inside the 1.0 s
+`hold_s` (30 ms). No `filtfilt`, no zero-phase, no centered windows. A trial that moves inside the 1.0 s
 baseline (the excursion of the post-settle window exceeds 12 early-baseline SDs, or the onset
 would fall inside it) is rejected. Tests check that truncating at the commit sample gives the
 same onset, that truncating one sample earlier gives none, that corrupting future samples changes
@@ -22,12 +22,59 @@ nothing, and that chunked == one-shot processing.
 ## What `lead_ms` is
 `lead_ms` is the **signal-onset lead**: the angle onset minus the EMG onset.
 
-EMG still line-fits the last `fit_s` (70 ms) of the baseline-standardised envelope and extrapolates
-to baseline. That line is computed at the hold, from samples at or before the hold only. A
-slope whose rise across the window is below one part in a million of the feature level and of
-the threshold (a negative slope, or the ~1e-17 slope `polyfit` can return on a flat window)
-is not extrapolated; the detector then reports the threshold-crossing sample. The back-dated
-index stays inside the fit window and does not move earlier than the end of the 1.0 s baseline.
+### EMG onset
+The 8 Hz envelope threshold and 30 ms hold only decide that a burst is underway. The onset is
+estimated separately, because the old estimate (a line through the envelope at the hold) moved
+with the burst. The envelope filter's delay and a fixed k*SD threshold both depend on how fast
+and how high the burst rises. On Fact Checker's synthetic grid the old lead error ran from +12.3 ms
+(10 ms rise, SNR 30) to -36.1 ms (150 ms rise, SNR 3).
+
+`RampOnset` (in `detect.py`) works on the band-passed signal, not the envelope, so no envelope
+delay enters. After the hold the detector waits `refine_s` = 0.1 s (samples already seen only)
+and takes the window from `lookback_s` = 0.4 s before the hold (never before the end of the 1.0 s
+baseline) to the commit sample. It scales that window by the baseline SD and models it as:
+
+- before the onset `j`: N(0, 1)
+- from `j` on: N(0, a^2), with a = 1 + (G - 1) * min((t - j) / R, 1). This is a linear amplitude
+  ramp of rise time R to gain G; R = 0 is a step.
+
+For every R (0 to 0.5 s in 20 ms steps, uniform prior) and G (1.2 to 60, 20 log-spaced values),
+the Gaussian log-likelihood of every `j` is one FFT correlation. Energy is pooled in 2 ms blocks
+for speed. The onset is the **posterior mean** of `j` (flat prior over the window). The band-pass
+filter's energy delay (1.15 ms at 20-450 Hz, order 2, 2000 Hz) is then subtracted; it depends on
+the filter only. If the fit cannot run, the old line fit is the fallback.
+
+Why this removes the rise-time and SNR dependence: the likelihood uses the burst's own gain and
+rise, so it does not depend on where a fixed absolute threshold sits on the burst. It also
+reads the raw band-passed samples, so the 8 Hz filter delay is not involved. Two choices matter
+on the slow, low-SNR cells (synthetic):
+
+- The posterior mean, not the arg-max. The arg-max snaps late when onset and rise time trade off.
+- A uniform prior on R. A log-spaced grid weights short rises and read about +2.5 ms late at
+  80-150 ms rise, SNR 3.
+
+The `refine_s` wait gives the fit more of the rise. At 150 ms / SNR 3 the per-trial SD is 24 ms
+without the wait and 14 ms with it (synthetic, 200 trials). A wait beyond 0.1 s did not help further.
+
+At the commit sample the envelope must still be above threshold. A baseline noise excursion
+that met the hold has decayed by then. That trigger is dropped and the detector **re-arms**: it
+rescans the samples it already has, so a later real burst is still found. Before this check,
+FC's generator produced about one onset in noise per ~3000 trials, hundreds of ms early.
+
+Results (synthetic only; full table in the PR): on FC's generator (linear amplitude ramp), rise
+10/20/40/80/150 ms x SNR 3/5/15/30, every cell's mean EMG onset error is within 2.3 ms. Its 95% CI
+is within +/-6 ms at 200 trials per cell (SNR 3-5) and 80 (SNR 15-30); `tests/test_emg_grid.py`.
+Per-trial SD is 1-3.5 ms at SNR 15-30 but 5-17 ms at SNR 3, rising with rise time. At low SNR the
+mean needs many trials: FC's 40-trial run leaves the 150 ms / SNR 3 cell's CI at about +/-5 ms.
+
+Limitations (synthetic):
+- The model is a linear amplitude ramp. An S-curve (smoothstep) burst reads late by about 10% of
+  its rise: +3.7 ms at 40 ms, about +8 ms at 80 ms, +14 ms at 150 ms (SNR 15). `SyntheticSource`
+  uses a 40 ms smoothstep, so leads from it read about 3.7 ms short. The 80/150 ms cases and the
+  sign bias on `SyntheticSource` are strict xfails.
+- A trial's burst must stay on for `refine_s` after the hold, or the trigger is dropped.
+- The EMG onset now commits 0.1 s after the hold. `detected_s` is that commit. `trigger_s` is the
+  hold time.
 
 The angle onset is not that line. A minimum-jerk flexion (Flash and Hogan 1985) leaves rest with
 zero acceleration, so velocity starts out curved and a short line reads the onset late (on the order
@@ -39,10 +86,11 @@ one of the two families, so it is not a separate tuning. If the fit does not bea
 the line-fit fallback is used.
 
 Signal-onset lead is the quantity compared to the exo latency because the 68.67 ms budget already
-includes the EMG path's processing (`t_win/2`). `detect_lead_ms` (difference of commit times) is a
-diagnostic and is not gated. `emg_confirmation_delay_ms` is the EMG commit time minus the back-dated
-EMG onset (about 51 ms on the synthetic burst, not the 30 ms hold). It is always reported. It is
-added to the budget only when `LatencyConfig(triggered=True)`.
+includes the EMG path's processing (`t_win/2`). `detect_lead_ms` (difference of commit times; the EMG
+commit is now 0.1 s after the hold) is a diagnostic and is not gated. `emg_confirmation_delay_ms`
+is the EMG hold time (`trigger_s`) minus the back-dated EMG onset: about 47 ms on the synthetic
+burst, not the 30 ms hold. A triggered controller fires at the hold, so the 0.1 s refine wait is
+not in it. It is always reported. It is added to the budget only when `LatencyConfig(triggered=True)`.
 
 The pass/fail gate is all of: the one-sided lower bound on subject means above the budget, the run
 having the planned 16 subjects x 3 sessions (`PLANNED_SHAPE` in `stats.py`), and no more than 10% of trials
@@ -58,8 +106,11 @@ until real pilot variances exist (`SampleSize` takes those variances; it does no
 
 Status: **Fact Checker round 2 failed (2026-11-11).** On out-of-family motion the onset error ran from
 49 ms early to 271 ms late, and the EMG onset showed a sign bias of about +/-11 ms, which is over the
-6 ms margin. The detectors here are not validated for real EMG or real motion, and the synthetic
-bias tests do not show otherwise.
+6 ms margin. The EMG side is addressed on synthetic data by the ramp-onset estimator above. The
+out-of-family motion cases are unchanged and are kept as strict xfails
+(`tests/test_imu_out_of_family.py`): late velocity peak +142.8 ms, slow creep then fast move
++271.3 ms, cosine ramp -42.3 ms, linear ramp -49.3 ms. The detectors here are not validated for real
+EMG or real motion, and the synthetic tests do not show otherwise.
 
 ## Run
 ```
@@ -71,6 +122,10 @@ That command is a **single-seed demo**. Seed 0's subject-mean spread can be a co
 against a design SD of about 8.91 ms (`SampleSize.design_subject_sd` with subject/session/trial SDs
 8/6/10 ms, 3 sessions, 10 trials). Pass `--seeds 6` to pool seeds 0..5. Writes `out/trials.csv` and
 `out/summary.json`.
+
+The latency budget is 18.67 ms IMU path + 50 ms EMG extra = 68.67 ms. `--imu-path-ms` is the only
+way to change it. `--total-latency-ms` is a check only. It must equal the IMU path + 50 ms, and a
+mismatch is an error. It used to set the IMU path to total - 50 without saying so.
 
 ## Output
 `trials.csv`: `subject_id, session_id, trial_id, emg_onset_s, imu_onset_s, lead_ms, margin_ms,
