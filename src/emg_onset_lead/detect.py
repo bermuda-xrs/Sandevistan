@@ -280,6 +280,7 @@ class _StreamDetector:
     _stopped: bool = field(default=False, init=False)
     _trig_window: np.ndarray | None = field(default=None, init=False)
     _trig_idx: int = field(default=0, init=False)
+    _sig_hist: list = field(default_factory=list, init=False)
     result: OnsetResult = field(default_factory=lambda: OnsetResult(None, None), init=False)
 
     def __post_init__(self):
@@ -333,18 +334,24 @@ class _StreamDetector:
             f, start = f[max(base_n - start, 0):], max(start, base_n)
             if f.size == 0 and self._pending is None:
                 return self.result
+        if f.size:
+            dev = f - self._mean
+            signed = np.abs(dev) if self.two_sided else dev
+            self._sig_hist.append(signed)
         if self._pending is not None:
             return self._maybe_commit()
         if f.size == 0:
             return self.result
-        dev = f - self._mean
+        return self._scan(signed, start)
+
+    def _scan(self, signed: np.ndarray, start: int) -> OnsetResult:
+        """Threshold-and-hold scan of post-baseline samples ``signed`` starting at ``start``."""
         keep = max(3, round(self.params.fit_s * self.fs))
-        signed = np.abs(dev) if self.two_sided else dev
         buf = np.concatenate([self._tail, signed])
         n_tail = self._tail.size
         self._tail = buf[-keep:]
         above = signed > self._thr
-        idx = np.arange(f.size)
+        idx = np.arange(signed.size)
         last_false = np.maximum.accumulate(np.where(~above, idx, -1))
         run = np.where(last_false >= 0, idx - last_false, idx + 1 + self._run)
         run = np.where(above, run, 0)
@@ -375,8 +382,32 @@ class _StreamDetector:
         commit = self._pending + self._refine_n
         if self._n - 1 < commit:
             return self.result
+        if not self._confirm(commit):
+            return self._rearm()
         self._finish(self._onset_samples(commit), commit)
         return self.result
+
+    def _confirm(self, commit_idx: int) -> bool:
+        """Whether the trigger still stands at the commit sample. The base detector keeps it."""
+        return True
+
+    def _signed_history(self) -> np.ndarray:
+        """Baseline-removed feature from the baseline end onward (index 0 = baseline end)."""
+        return np.concatenate(self._sig_hist) if self._sig_hist else np.zeros(0)
+
+    def _rearm(self) -> OnsetResult:
+        """Drop the pending trigger and rescan, from the sample after it, what is already in."""
+        trig = self._pending
+        self._pending = None
+        self._run = 0
+        sig = self._signed_history()
+        rel = trig - round(self.params.baseline_s * self.fs)
+        keep = max(3, round(self.params.fit_s * self.fs))
+        self._tail = sig[max(0, rel + 1 - keep):rel + 1]
+        rest = sig[rel + 1:]
+        if rest.size == 0:
+            return self.result
+        return self._scan(rest, trig + 1)
 
     def _onset_samples(self, commit_idx: int) -> float:
         return self._backdate(self._trig_window, self._trig_idx)
@@ -481,6 +512,16 @@ class EmgOnsetDetector(_StreamDetector):
 
     def _observed(self):
         return np.concatenate(self._env) if self._env else None
+
+    def _confirm(self, commit_idx: int) -> bool:
+        """A burst is still on at the commit sample: the envelope is above threshold there.
+
+        A noise excursion that met the 30 ms hold has decayed ``refine_s`` later. That trigger
+        is dropped and the detector re-arms (``_rearm``) instead of reporting an onset in noise.
+        """
+        sig = self._signed_history()
+        rel = commit_idx - round(self.params.baseline_s * self.fs)
+        return 0 <= rel < sig.size and bool(sig[rel] > self._thr)
 
     def _onset_samples(self, commit_idx: int) -> float:
         p = self.params
