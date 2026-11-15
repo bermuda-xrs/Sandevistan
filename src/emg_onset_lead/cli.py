@@ -10,6 +10,9 @@ from .latency import LatencyConfig
 from .sources import SyntheticSource
 from .stats import PLANNED_SESSIONS, PLANNED_SUBJECTS, LeadStats, SampleSize
 
+# --total-latency-ms is compared to imu_path_ms + emg_extra_ms, which LatencyConfig rounds to 1e-6 ms.
+TOTAL_TOL_MS = 1e-6
+
 
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="emg_onset_lead")
@@ -24,8 +27,11 @@ def main(argv=None) -> int:
                    help="pool seeds 0..N-1. Default is a single seed (--seed); subject-mean SD is one draw")
     r.add_argument("--true-lead-ms", type=float, default=80.0)
     r.add_argument("--confidence", type=float, default=0.95)
+    r.add_argument("--imu-path-ms", type=float, default=None,
+                   help="IMU-path latency (default 18.67). The only way to change the budget")
     r.add_argument("--total-latency-ms", type=float, default=None,
-                   help="override required latency (default: LatencyConfig total, 68.67)")
+                   help="check only: must equal imu path + 50 ms EMG extra (68.67 by default). "
+                        "It never changes --imu-path-ms; a mismatch is an error")
     r.add_argument("--triggered", action="store_true",
                    help="add measured EMG confirmation delay to the 68.67 ms budget")
     r.add_argument("--out", type=Path, default=Path("out"))
@@ -34,8 +40,12 @@ def main(argv=None) -> int:
         p.error("only --synthetic is supported (no real dataset loaders are shipped)")
 
     lat = LatencyConfig(triggered=a.triggered)
-    if a.total_latency_ms is not None:
-        lat = LatencyConfig(imu_path_ms=a.total_latency_ms - lat.emg_extra_ms, triggered=a.triggered)
+    if a.imu_path_ms is not None:
+        lat = LatencyConfig(imu_path_ms=a.imu_path_ms, triggered=a.triggered)
+    if a.total_latency_ms is not None and abs(a.total_latency_ms - lat.total_ms) > TOTAL_TOL_MS:
+        p.error(f"--total-latency-ms {a.total_latency_ms:g} does not match imu path "
+                f"{lat.imu_path_ms:g} + EMG extra {lat.emg_extra_ms:g} = {lat.total_ms:g} ms. "
+                "The total is not used to back out the IMU path; set --imu-path-ms explicitly")
     seeds = [a.seed] if a.seeds is None else list(range(a.seeds))
     if not seeds:
         p.error("--seeds must be >= 1")
