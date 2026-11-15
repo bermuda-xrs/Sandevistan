@@ -85,7 +85,7 @@ def test_recovers_known_lead():
     assert lo < pooled.mean() < hi  # the known shape bias, not something new
 
 
-@pytest.mark.xfail(strict=True, reason=(
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
     "Known gap: the linear-ramp EMG onset model reads a 40 ms smoothstep burst ~3.7 ms late "
     "(synthetic), so every seed's lead error is negative. See README 'EMG onset'."))
 def test_no_sign_bias_on_smoothstep_burst():
