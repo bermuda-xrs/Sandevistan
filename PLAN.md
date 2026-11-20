@@ -8,12 +8,13 @@ Measures lead = IMU/angle onset - EMG onset per trial; tests pooled one-sided lo
 - `detect.py` causal streaming detectors. `OnsetParams(baseline_s=1.0, settle_s, k, hold_s, fit_s, rest_ratio)`,
   `EmgParams`, `ImuParams(mode, refine_s=0.55)`, `OnsetResult(onset_s, detected_s, baseline_rest_ok)`.
   `OnsetResult.trigger_s` = hold time. `EmgParams(refine_s=0.1, lookback_s=0.4, rise_max_s=0.5,
-  rise_step_s=0.02, gain_range=(1.2, 60), n_gain=20, block_s=0.002)`.
+  rise_step_s=0.02, gain_range=(1.2, 60), n_gain=20, block_s=0.002, short_burst_peak=1.5)`.
   EMG: envelope k*SD + 30 ms hold triggers. 0.1 s later the onset is `RampOnset`: the posterior mean of
   a change point on the band-passed signal (baseline-SD units). Before it: N(0,1). After it: a linear
   amplitude ramp, rise R uniform 0-0.5 s, gain log 1.2-60. Minus the band-pass energy delay (1.15 ms).
-  At the commit the envelope must still be above threshold, or the trigger is dropped and the
-  detector re-arms on the stored samples. The line fit over `fit_s` is the fallback. IMU: after the hold, fit
+  At the commit the envelope must still be above threshold, or (an ended short burst) must have
+  peaked at >= 1.5x threshold since the hold, in which case the fit ends at that peak. Otherwise
+  the trigger is dropped and the detector re-arms on the stored samples. The line fit over `fit_s` is the fallback. IMU: after the hold, fit
   minimum-jerk and critically damped families on the raw angle (`KinematicOnset`); line fit is the fallback.
   `BaselineRest` rejects a move inside the 1.0 s baseline.
 - `sources.py` `Trial`, `TrialSource`, `SyntheticSource` (critically damped), `MinJerkSource` (Flash & Hogan 1985).
@@ -42,5 +43,10 @@ Kinematic onset is synthetic-only. Unverified on real motion until a bench move 
 16x3 power is unverified until those pilot variances are real.
 EMG onset (synthetic): FC's rise 10-150 ms x SNR 3-30 grid holds every cell's mean and 95% CI inside +/-6 ms
 at 200/80 trials per cell (`tests/test_emg_grid.py`); at FC's 40 trials the 150 ms / SNR 3 CI reaches -7.3 ms. An S-curve burst reads late by ~10% of its rise (strict xfails). Per-trial SD is
-5-17 ms at SNR 3. Out-of-family motion is unchanged (strict xfails in `tests/test_imu_out_of_family.py`).
+5-14 ms at SNR 3. Isolated 40-80 ms bursts: >= 96% detected except 40 ms / SNR 3 (78-87%);
+`tests/test_emg_short_burst.py`.
+In-family bias (synthetic, `scripts/bias_guard_band.py`, 16x3x10 SyntheticSource, seeds 0-5): -3.93 ms
+(95% CI over seeds [-4.05, -3.81]); option C u = 0.139 ms, w = k*u -> gate 68.81/68.95/69.09 ms (k = 1/2/3).
+u covers detector noise on one burst shape only. Rise/shape dependence (about -0.3 to -14.5 ms) dominates
+and is unknown without recorded EMG. Out-of-family motion is unchanged (strict xfails in `tests/test_imu_out_of_family.py`).
 Fact Checker round 2 FAILED 2026-11-11: out-of-family motion 49 ms early to 271 ms late, EMG sign bias ~±11 ms (> 6 ms margin). A single demo seed is not the 8.91 ms design SD.

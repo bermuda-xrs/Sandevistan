@@ -56,25 +56,69 @@ on the slow, low-SNR cells (synthetic):
 The `refine_s` wait gives the fit more of the rise. At 150 ms / SNR 3 the per-trial SD is 24 ms
 without the wait and 14 ms with it (synthetic, 200 trials). A wait beyond 0.1 s did not help further.
 
-At the commit sample the envelope must still be above threshold. A baseline noise excursion
-that met the hold has decayed by then. That trigger is dropped and the detector **re-arms**: it
-rescans the samples it already has, so a later real burst is still found. Before this check,
-FC's generator produced about one onset in noise per ~3000 trials, hundreds of ms early.
+At the commit sample the trigger is checked:
+- The envelope is still above threshold: a burst is on, and the fit runs to the commit.
+- The envelope is back below threshold, but it peaked at >= `short_burst_peak` = 1.5 thresholds
+  (baseline-removed) since the hold: an **isolated short burst** (40-80 ms) that has ended. It is
+  kept, and the fit window ends at the envelope peak, so post-burst baseline does not pull the
+  ramp model.
+- Otherwise it is a baseline noise excursion that met the hold and decayed. That trigger is
+  dropped and the detector **re-arms**: it rescans the samples it already has, so a later real
+  burst is still found.
+
+Why 1.5 (synthetic): in ~490 h of white noise, 229 false triggers peaked at 1.00-1.57x
+threshold, and 3 of them (1.3%) reached 1.5x. Isolated bursts with a 20 ms rise peak above
+2.7x at SNR >= 5. At SNR 3 / 40 ms the median peak is 2.3x and the minimum 1.2x. Without any commit check, FC's
+generator produced about one onset in noise per ~3000 trials, hundreds of ms early. The
+previous check (envelope above threshold at the commit) dropped every isolated 40-60 ms burst.
+Isolated bursts detected, 20 ms rise, 60 trials (synthetic): 60/60 at SNR 3/5/15/30 x
+40/60/80/100/150 ms, except SNR 3 / 40 ms at 53/60 (base 608a151: 58/60). Mean onset error is
+within +/-3 ms in every cell (`tests/test_emg_short_burst.py`).
 
 Results (synthetic only; full table in the PR): on FC's generator (linear amplitude ramp), rise
 10/20/40/80/150 ms x SNR 3/5/15/30, every cell's mean EMG onset error is within 2.3 ms. Its 95% CI
 is within +/-6 ms at 200 trials per cell (SNR 3-5) and 80 (SNR 15-30); `tests/test_emg_grid.py`.
-Per-trial SD is 1-3.5 ms at SNR 15-30 but 5-17 ms at SNR 3, rising with rise time. At low SNR the
+Per-trial SD is 1-3.5 ms at SNR 15-30 but 5-14 ms at SNR 3, rising with rise time (about 14.2 ms at
+150 ms / SNR 3; one 40-trial draw showed 16.6). At low SNR the
 mean needs many trials: FC's 40-trial run leaves the 150 ms / SNR 3 cell's CI at about +/-5 ms.
 
 Limitations (synthetic):
 - The model is a linear amplitude ramp. An S-curve (smoothstep) burst reads late by about 10% of
   its rise: +3.7 ms at 40 ms, about +8 ms at 80 ms, +14 ms at 150 ms (SNR 15). `SyntheticSource`
-  uses a 40 ms smoothstep, so leads from it read about 3.7 ms short. The 80/150 ms cases and the
-  sign bias on `SyntheticSource` are strict xfails.
-- A trial's burst must stay on for `refine_s` after the hold, or the trigger is dropped.
+  uses a 40 ms smoothstep, so leads from it read about 3.9 ms short (see below). The 80/150 ms
+  cases and the sign bias on `SyntheticSource` are strict xfails.
+- A burst that has ended by the commit must have peaked at >= 1.5x threshold, or it is treated
+  as noise. Isolated 40 ms bursts at SNR 3 are missed about 13-22% of the time.
 - The EMG onset now commits 0.1 s after the hold. `detected_s` is that commit. `trigger_s` is the
   hold time.
+
+### In-family bias and the option C guard band (synthetic)
+`scripts/bias_guard_band.py` (about 40 s) runs the planned 16x3x10 `SyntheticSource` study for
+seeds 0-5. That is the repo's in-family case: a 40 ms smoothstep burst at SNR 15 x U(0.7, 1.3)
+and a critically damped move. For each seed it computes the lead error (detected minus true)
+and a nested ANOVA (subject > session > trial). It reports:
+- bias = the mean of subject means
+- u = the subject-cluster SE of that bias
+- u_new_subject
+
+This is the same method as `bias_split.py` on analysis/emg-polarity-bias (3e9c27b).
+
+Values at this checkout (synthetic):
+- **bias = -3.93 ms** (lead reads short). The seed-to-seed SD is 0.12 ms, and the 95% CI over
+  6 seeds is [-4.05, -3.81] ms.
+- **u = 0.139 ms** (range 0.087-0.180 over seeds). u_new_subject = 0.649 ms.
+- Guard band w = k*u: 0.14 / 0.28 / 0.42 ms for k = 1/2/3, so a gate of 68.81 / 68.95 /
+  69.09 ms. With u_new_subject: 69.32 / 69.97 / 70.62 ms.
+
+These replace the stale base-608a151 values (bias +0.35 ms, u = 0.17 ms).
+
+Uncertainty: u and the seed spread cover only detector noise on this one synthetic burst shape.
+They do not cover shape or rise time, which dominate. On smoothstep bursts at SNR 15 the bias
+runs from about -0.3 ms (10 ms rise) to -14.5 ms (150 ms rise); Fact Checker PR #4, table B.
+The real rise-time distribution is unknown (no recorded EMG). Option C only raises the gate
+(68.67 + w). The -3.93 ms lateness already uses about 4 of the 6 ms margin, so any w > 0 cuts
+power further. If option C instead added an estimated bias back, a wrong estimate would be
+anti-conservative.
 
 The angle onset is not that line. A minimum-jerk flexion (Flash and Hogan 1985) leaves rest with
 zero acceleration, so velocity starts out curved and a short line reads the onset late (on the order

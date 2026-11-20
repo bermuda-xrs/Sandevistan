@@ -13,7 +13,9 @@ class LatencyConfig:
 
     ``triggered`` is off by default. Turn it on only for a triggered controller, which
     cannot act until the EMG onset is confirmed: the total budget then grows by the
-    measured confirmation delay (EMG detected time minus back-dated EMG onset).
+    measured confirmation delay: the EMG hold time (``OnsetResult.trigger_s``) minus the
+    back-dated EMG onset. ``Harness`` falls back to ``detected_s`` only when ``trigger_s`` is
+    None. The EMG refine wait after the hold is not part of it.
     """
 
     imu_path_ms: float = 18.67
