@@ -54,6 +54,10 @@ class EmgParams(OnsetParams):
     gain_range: tuple[float, float] = (1.2, 60.0)  # burst/baseline amplitude grid, log spaced
     n_gain: int = 20
     block_s: float = 0.002  # energy is pooled over blocks this long before the fit (speed)
+    # A burst that has already ended by the commit is kept if its envelope peaked at least this many
+    # thresholds (baseline-removed). Pure-noise triggers peaked at most 1.57x in ~490 h of synthetic
+    # noise (229 triggers; 3 reached 1.5x); 40-80 ms bursts at SNR >= 5 peak above 2.7x (synthetic).
+    short_burst_peak: float = 1.5
 
 
 @dataclass(frozen=True)
@@ -502,6 +506,7 @@ class EmgOnsetDetector(_StreamDetector):
         self._rise_grid = np.arange(0.0, params.rise_max_s + 1e-9, params.rise_step_s)
         self._gain_grid = np.geomspace(params.gain_range[0], params.gain_range[1], params.n_gain)
         self._block = max(1, round(params.block_s * fs))
+        self._fit_end: int | None = None  # set by _confirm
 
     def _feature(self, x):
         b = self._bp(x)
@@ -514,17 +519,34 @@ class EmgOnsetDetector(_StreamDetector):
         return np.concatenate(self._env) if self._env else None
 
     def _confirm(self, commit_idx: int) -> bool:
-        """A burst is still on at the commit sample: the envelope is above threshold there.
+        """Keep the trigger if a burst is still on at the commit, or was a clear short burst.
 
-        A noise excursion that met the 30 ms hold has decayed ``refine_s`` later. That trigger
-        is dropped and the detector re-arms (``_rearm``) instead of reporting an onset in noise.
+        - Envelope above threshold at the commit: a burst is on. The onset fit runs to the commit.
+        - Envelope back below threshold, but its peak since the hold reached ``short_burst_peak``
+          thresholds: an isolated short burst (e.g. 40-80 ms) that has ended. The onset fit
+          window ends at that envelope peak, so the post-burst baseline does not pull the
+          ramp model.
+        - Otherwise a noise excursion that met the 30 ms hold and decayed. The trigger is
+          dropped and the detector re-arms (``_rearm``).
         """
         sig = self._signed_history()
-        rel = commit_idx - round(self.params.baseline_s * self.fs)
-        return 0 <= rel < sig.size and bool(sig[rel] > self._thr)
+        base_n = round(self.params.baseline_s * self.fs)
+        rel = commit_idx - base_n
+        self._fit_end = commit_idx
+        if not 0 <= rel < sig.size:
+            return False
+        if sig[rel] > self._thr:
+            return True
+        seg = sig[self._pending - base_n:rel + 1]
+        if seg.size == 0 or float(seg.max()) < self.params.short_burst_peak * self._thr:
+            return False
+        self._fit_end = self._pending + int(np.argmax(seg))
+        return True
 
     def _onset_samples(self, commit_idx: int) -> float:
         p = self.params
+        if self._fit_end is not None:
+            commit_idx = min(commit_idx, self._fit_end)  # a short burst's fit ends at its peak
         bp = np.concatenate(self._bp_hist)
         base_n, settle_n = round(p.baseline_s * self.fs), round(p.settle_s * self.fs)
         sd = float(np.std(bp[settle_n:base_n], ddof=1)) if base_n - settle_n > 1 else 0.0
