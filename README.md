@@ -58,7 +58,7 @@ without the wait and 14 ms with it (synthetic, 200 trials). A wait beyond 0.1 s 
 
 At the commit sample the trigger is checked:
 - The envelope is still above threshold: a burst is on, and the fit runs to the commit.
-- The envelope is back below threshold, but it peaked at >= `short_burst_peak` = 1.5 thresholds
+- The envelope is back below threshold, but it peaked at >= `short_burst_peak` = 1.6 thresholds
   (baseline-removed) since the hold: an **isolated short burst** (40-80 ms) that has ended. It is
   kept, and the fit window ends at the envelope peak, so post-burst baseline does not pull the
   ramp model.
@@ -66,14 +66,31 @@ At the commit sample the trigger is checked:
   dropped and the detector **re-arms**: it rescans the samples it already has, so a later real
   burst is still found.
 
-Why 1.5 (synthetic): in ~490 h of white noise, 229 false triggers peaked at 1.00-1.57x
-threshold, and 3 of them (1.3%) reached 1.5x. Isolated bursts with a 20 ms rise peak above
-2.7x at SNR >= 5. At SNR 3 / 40 ms the median peak is 2.3x and the minimum 1.2x. Without any commit check, FC's
+Why 1.6 (synthetic; Fact Checker's factor sweep, PR #4 round 2, 499 h of white noise):
+- At the baseline noise level, false onsets fall from 0.016/h at 1.5x to 0.008/h at 1.6x. Noise
+  triggers peaked at up to ~1.73x, so no factor is a hard bound.
+- The cost is short-burst detection at 40 ms / SNR 3: 246 -> 234 of 300. Every other short-burst
+  cell stays at 297-300/300.
+- With a noise floor 10-20% above the baseline the floor dominates, not the factor. At +10%:
+  0.60/h at 1.5x -> 0.28/h at 1.6x. At +20%: 63/h -> 47/h. About half of that comes from the
+  pre-existing path (envelope still above threshold at the commit), which this factor cannot fix.
+
+Isolated bursts with a 20 ms rise peak above 2.7x at SNR >= 5. At SNR 3 / 40 ms the median peak
+is 2.3x and the minimum 1.2x. Without any commit check, FC's
 generator produced about one onset in noise per ~3000 trials, hundreds of ms early. The
 previous check (envelope above threshold at the commit) dropped every isolated 40-60 ms burst.
-Isolated bursts detected, 20 ms rise, 60 trials (synthetic): 60/60 at SNR 3/5/15/30 x
-40/60/80/100/150 ms, except SNR 3 / 40 ms at 53/60 (base 608a151: 58/60). Mean onset error is
-within +/-3 ms in every cell (`tests/test_emg_short_burst.py`).
+Isolated bursts at 1.6x (synthetic; 20 ms linear rise, test generator and seed,
+`tests/test_emg_short_burst.py`), 300 trials per cell: detected / 300, mean onset error (SD):
+
+| SNR | 40 ms | 60 ms | 80 ms |
+|---:|---|---|---|
+| 3 | 243/300, -1.19 ms (9.8) | 299/300, -1.91 ms (8.4) | 300/300, -2.39 ms (8.5) |
+| 5 | 300/300, +0.29 ms (4.2) | 300/300, +0.27 ms (4.0) | 300/300, -0.56 ms (4.0) |
+| 15 | 300/300, -0.81 ms (1.6) | 300/300, -0.36 ms (1.5) | 300/300, -0.76 ms (1.8) |
+| 30 | 300/300, -0.68 ms (0.9) | 300/300, -0.50 ms (1.0) | 300/300, -1.09 ms (1.2) |
+
+At 60 trials (FC's short-burst form, 40-150 ms) every cell is 60/60 except SNR 3 / 40 ms at
+49/60 (base 608a151: 58/60). The mean onset error is within +/-3 ms in every cell.
 
 Results (synthetic only; full table in the PR): on FC's generator (linear amplitude ramp), rise
 10/20/40/80/150 ms x SNR 3/5/15/30, every cell's mean EMG onset error is within about 3.3 ms (max |mean| 2.23 ms on the test's
@@ -88,8 +105,8 @@ Limitations (synthetic):
   its rise: +3.7 ms at 40 ms, about +8 ms at 80 ms, +14 ms at 150 ms (SNR 15). `SyntheticSource`
   uses a 40 ms smoothstep, so leads from it read about 3.9 ms short (see below). The 80/150 ms
   cases and the sign bias on `SyntheticSource` are strict xfails.
-- A burst that has ended by the commit must have peaked at >= 1.5x threshold, or it is treated
-  as noise. Isolated 40 ms bursts at SNR 3 are missed about 13-22% of the time.
+- A burst that has ended by the commit must have peaked at >= 1.6x threshold, or it is treated
+  as noise. Isolated 40 ms bursts at SNR 3 are missed about 22% of the time (FC: 234/300 kept).
 - The EMG onset now commits 0.1 s after the hold. `detected_s` is that commit. `trigger_s` is the
   hold time.
 
