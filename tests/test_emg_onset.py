@@ -15,8 +15,8 @@ def _noise_trigger_then_burst(burst_at=3.2):
     """Pure noise with a real false trigger, then a real burst.
 
     ``default_rng([7, 259])`` white noise meets the k*SD + 30 ms hold at ~2.46 s by chance (found
-    by search; the envelope peaks at only ~1.1x threshold). A 40 ms-rise burst to x15 starts at
-    ``burst_at``. The noise before ``burst_at`` is untouched.
+    by search; the envelope peaks at only ~1.1x threshold, below short_burst_peak = 1.6x).
+    A 40 ms-rise burst to x15 starts at ``burst_at``. The noise before ``burst_at`` is untouched.
     """
     rng = np.random.default_rng([7, 259])
     x = rng.normal(0, 1, round(4.0 * FS))

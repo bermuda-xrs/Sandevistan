@@ -55,9 +55,11 @@ class EmgParams(OnsetParams):
     n_gain: int = 20
     block_s: float = 0.002  # energy is pooled over blocks this long before the fit (speed)
     # A burst that has already ended by the commit is kept if its envelope peaked at least this many
-    # thresholds (baseline-removed). Pure-noise triggers peaked at most 1.57x in ~490 h of synthetic
-    # noise (229 triggers; 3 reached 1.5x); 40-80 ms bursts at SNR >= 5 peak above 2.7x (synthetic).
-    short_burst_peak: float = 1.5
+    # thresholds (baseline-removed). Tradeoff (FC, synthetic white noise, 499 h): false onsets fall
+    # from 0.016/h at 1.5x to 0.008/h at 1.6x (noise triggers peaked up to ~1.73x); the cost is
+    # 40 ms / SNR 3 short-burst detection 246 -> 234 of 300. 40-80 ms bursts at SNR >= 5 peak
+    # above 2.7x. A noise floor 10-20% above baseline dominates over this factor (see README).
+    short_burst_peak: float = 1.6
 
 
 @dataclass(frozen=True)
@@ -523,7 +525,7 @@ class EmgOnsetDetector(_StreamDetector):
 
         - Envelope above threshold at the commit: a burst is on. The onset fit runs to the commit.
         - Envelope back below threshold, but its peak since the hold reached ``short_burst_peak``
-          thresholds: an isolated short burst (e.g. 40-80 ms) that has ended. The onset fit
+          (1.6) thresholds: an isolated short burst (e.g. 40-80 ms) that has ended. The onset fit
           window ends at that envelope peak, so the post-burst baseline does not pull the
           ramp model.
         - Otherwise a noise excursion that met the 30 ms hold and decayed. The trigger is
