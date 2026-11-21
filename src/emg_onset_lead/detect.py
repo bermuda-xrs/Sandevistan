@@ -9,6 +9,13 @@ The angle onset is not a straight-line extrapolation of velocity. A minimum-jerk
 line fit over a short window fires late. At the trigger the IMU detector instead waits a fixed
 horizon (still only past samples) and least-squares matches two rest-to-move families —
 minimum-jerk and critically damped — on that same window.
+
+The EMG onset is not the threshold crossing or a line through the 8 Hz envelope either: both
+move with burst rise time and amplitude, because the envelope filter's delay and the k*SD
+threshold sit at a fixed absolute level. After the hold the EMG detector waits ``refine_s``
+(past samples only) and computes a change-point posterior on the band-passed signal itself
+(``RampOnset``): Gaussian noise at the baseline SD before the onset, an amplitude ramp of free
+rise time and free gain after it. The onset is the posterior mean over that bounded window.
 """
 
 from __future__ import annotations
@@ -16,7 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import numpy as np
-from scipy import signal
+from scipy import fft, signal
 
 
 @dataclass(frozen=True)
@@ -24,7 +31,7 @@ class OnsetParams:
     baseline_s: float = 1.0  # fixed calibration window at trial start; the limb must be at rest
     settle_s: float = 0.2  # skip filter start-up transient inside the baseline window
     k: float = 5.0  # threshold = mean + k * SD of baseline feature
-    hold_s: float = 0.025  # feature must stay beyond threshold this long
+    hold_s: float = 0.03  # feature must stay beyond threshold this long (30 ms, outside the latency budget)
     fit_s: float = 0.07  # live window for the line-fit fallback (EMG, and IMU if the kinematic fit fails)
     # Not at rest when the peak excursion exceeds this many early-baseline SDs.
     # 12 clears the EMG envelope at rest (observed up to ~10) and still flags a
@@ -39,6 +46,21 @@ class EmgParams(OnsetParams):
     band_hz: tuple[float, float] = (20.0, 450.0)
     envelope_hz: float = 8.0
     order: int = 2
+    # Onset estimate (``RampOnset``). The envelope threshold only decides that a burst is underway.
+    refine_s: float = 0.1  # wait after the hold, then commit; the onset uses samples up to the commit
+    lookback_s: float = 0.4  # window start before the hold sample (never before the baseline end)
+    rise_max_s: float = 0.5  # rise-time grid 0, step, ..., max (uniform prior)
+    rise_step_s: float = 0.02
+    gain_range: tuple[float, float] = (1.2, 60.0)  # burst/baseline amplitude grid, log spaced
+    n_gain: int = 20
+    block_s: float = 0.002  # energy is pooled over blocks this long before the fit (speed)
+    # A burst that has already ended by the commit is kept if its envelope peaked at least this many
+    # thresholds (baseline-removed). Tradeoff (FC, synthetic white noise, 499 h): false onsets fall
+    # from 0.016/h at 1.5x to 0.008/h at 1.6x (noise triggers peaked up to ~1.73x); the cost is
+    # 40 ms / SNR 3 short-burst detection 246 -> 234 of 300. 40-80 ms bursts at SNR >= 5 peak at
+    # >= 2.7x (a property of the burst, not of this factor). A noise floor 10-20% above baseline
+    # dominates over this factor (see README).
+    short_burst_peak: float = 1.6
 
 
 @dataclass(frozen=True)
@@ -58,6 +80,9 @@ class OnsetResult:
     onset_s: float | None  # signal onset (back-dated); None if missed or the baseline was not rest
     detected_s: float | None  # time the detector could first commit (earliest a live system can know)
     baseline_rest_ok: bool = True
+    # Time the threshold hold was met: a live controller knows a move is underway here. For a
+    # detector with ``refine_s`` > 0 it is ``refine_s`` before ``detected_s``.
+    trigger_s: float | None = None
 
 
 class BaselineRest:
@@ -82,7 +107,8 @@ class BaselineRest:
         return float(np.max(np.abs(seg - np.median(early))) / sd)
 
     @staticmethod
-    def at_rest(x, fs: float, settle_s: float, baseline_s: float, max_ratio: float = 6.0) -> bool:
+    def at_rest(x, fs: float, settle_s: float, baseline_s: float,
+                max_ratio: float = OnsetParams.rest_ratio) -> bool:
         return BaselineRest.excursion_ratio(x, fs, settle_s, baseline_s) <= max_ratio
 
 
@@ -178,6 +204,72 @@ class KinematicOnset:
         return float(j + np.clip(0.5 * (s0 - s2) / den, -1.0, 1.0))
 
 
+class RampOnset:
+    """Onset of an EMG burst from the band-passed signal, using only a bounded past window.
+
+    Model, in units of the baseline SD: before the onset ``j`` the samples are N(0, 1); from
+    ``j`` on they are N(0, a(t - j)^2) with a(u) = 1 + (G - 1) * min(u / R, 1), a linear amplitude
+    ramp of rise time R to a gain G (R = 0 is a step). For every (R, G) on a grid the Gaussian
+    log-likelihood of each ``j`` is one FFT correlation. The onset is the posterior mean of ``j``
+    with flat priors on ``j`` over the window, on R (uniform), and on log G.
+
+    The posterior mean, not the arg-max, is used: when the rise is slow and the SNR low, onset
+    and rise time trade off, and the arg-max snaps late (toward short R). A log-spaced R grid
+    did the same (about +2.5 ms on 80-150 ms rises at SNR 3, synthetic); a uniform R prior
+    out to 0.5 s removed it.
+    """
+
+    @staticmethod
+    def estimate(z, fs: float, rise_grid_s, gain_grid, block: int = 1) -> float | None:
+        """Posterior-mean onset, in samples from the start of ``z``. None if ``z`` is too short.
+
+        ``block`` samples are pooled into one energy sum (the likelihood is exact for a block
+        whose amplitude is constant; the ramp is evaluated at the block centre). Candidate
+        onsets are block boundaries; the posterior mean is still continuous.
+        """
+        z = np.asarray(z, dtype=float)
+        m = max(1, int(block))
+        n = z.size // m
+        if n < 16 or not np.all(np.isfinite(z)):
+            return None
+        e = (z[: n * m] ** 2).reshape(n, m).sum(axis=1)  # energy per block
+        rise = np.asarray(rise_grid_s, dtype=float)
+        gain = np.asarray(gain_grid, dtype=float)
+        k = np.arange(n)
+        u = (k + 0.5) * m / fs  # seconds from a candidate onset to each block centre
+        h = np.ones((rise.size, n))
+        slow = rise > 0
+        h[slow] = np.clip(u[None, :] / rise[slow, None], 0.0, 1.0)
+        a = (1.0 + (gain[None, :, None] - 1.0) * h[:, None, :]).reshape(-1, n)
+        # NLL relative to "no onset": sum over blocks b >= j of m log a + e_b / (2 a^2) - e_b / 2.
+        log_a = np.cumsum(m * np.log(a), axis=1)  # first n - j terms
+        q = 0.5 * (1.0 / a**2 - 1.0)
+        nfft = fft.next_fast_len(2 * n - 1, real=True)
+        ee = fft.rfft(e[::-1], nfft)
+        corr = fft.irfft(fft.rfft(q, nfft, axis=1) * ee[None, :], nfft, axis=1)[:, :n][:, ::-1]
+        loglik = -(log_a[:, n - 1 - k] + corr)
+        loglik[:, :2] = -np.inf  # need some baseline before and some burst after the onset
+        loglik[:, -3:] = -np.inf
+        top = float(np.max(loglik))
+        if not np.isfinite(top):
+            return None
+        w = np.exp(loglik - top).sum(axis=0)
+        return float(np.dot(w, k) / w.sum() * m)
+
+    @staticmethod
+    def energy_delay_s(sos: np.ndarray, fs: float, length_s: float = 0.5) -> float:
+        """Energy centroid of the band-pass impulse response (seconds).
+
+        The band-pass smears a change in noise power by its squared impulse response, which
+        delays the fitted onset by about this much (about 1.15 ms for 20-450 Hz, order 2,
+        2000 Hz). It depends on the filter only, so it is subtracted as a constant.
+        """
+        imp = np.zeros(max(2, round(length_s * fs)))
+        imp[0] = 1.0
+        e = signal.sosfilt(sos, imp) ** 2
+        return float(np.dot(np.arange(e.size), e) / e.sum() / fs)
+
+
 @dataclass
 class _StreamDetector:
     fs: float
@@ -195,6 +287,7 @@ class _StreamDetector:
     _stopped: bool = field(default=False, init=False)
     _trig_window: np.ndarray | None = field(default=None, init=False)
     _trig_idx: int = field(default=0, init=False)
+    _sig_hist: list = field(default_factory=list, init=False)
     result: OnsetResult = field(default_factory=lambda: OnsetResult(None, None), init=False)
 
     def __post_init__(self):
@@ -248,18 +341,24 @@ class _StreamDetector:
             f, start = f[max(base_n - start, 0):], max(start, base_n)
             if f.size == 0 and self._pending is None:
                 return self.result
+        if f.size:
+            dev = f - self._mean
+            signed = np.abs(dev) if self.two_sided else dev
+            self._sig_hist.append(signed)
         if self._pending is not None:
             return self._maybe_commit()
         if f.size == 0:
             return self.result
-        dev = f - self._mean
+        return self._scan(signed, start)
+
+    def _scan(self, signed: np.ndarray, start: int) -> OnsetResult:
+        """Threshold-and-hold scan of post-baseline samples ``signed`` starting at ``start``."""
         keep = max(3, round(self.params.fit_s * self.fs))
-        signed = np.abs(dev) if self.two_sided else dev
         buf = np.concatenate([self._tail, signed])
         n_tail = self._tail.size
         self._tail = buf[-keep:]
         above = signed > self._thr
-        idx = np.arange(f.size)
+        idx = np.arange(signed.size)
         last_false = np.maximum.accumulate(np.where(~above, idx, -1))
         run = np.where(last_false >= 0, idx - last_false, idx + 1 + self._run)
         run = np.where(above, run, 0)
@@ -290,8 +389,32 @@ class _StreamDetector:
         commit = self._pending + self._refine_n
         if self._n - 1 < commit:
             return self.result
+        if not self._confirm(commit):
+            return self._rearm()
         self._finish(self._onset_samples(commit), commit)
         return self.result
+
+    def _confirm(self, commit_idx: int) -> bool:
+        """Whether the trigger still stands at the commit sample. The base detector keeps it."""
+        return True
+
+    def _signed_history(self) -> np.ndarray:
+        """Baseline-removed feature from the baseline end onward (index 0 = baseline end)."""
+        return np.concatenate(self._sig_hist) if self._sig_hist else np.zeros(0)
+
+    def _rearm(self) -> OnsetResult:
+        """Drop the pending trigger and rescan, from the sample after it, what is already in."""
+        trig = self._pending
+        self._pending = None
+        self._run = 0
+        sig = self._signed_history()
+        rel = trig - round(self.params.baseline_s * self.fs)
+        keep = max(3, round(self.params.fit_s * self.fs))
+        self._tail = sig[max(0, rel + 1 - keep):rel + 1]
+        rest = sig[rel + 1:]
+        if rest.size == 0:
+            return self.result
+        return self._scan(rest, trig + 1)
 
     def _onset_samples(self, commit_idx: int) -> float:
         return self._backdate(self._trig_window, self._trig_idx)
@@ -303,14 +426,14 @@ class _StreamDetector:
             self._stopped = True
             self.result = OnsetResult(None, None, False)
             return
-        self.result = OnsetResult(onset_s, detected_idx / self.fs, True)
+        self.result = OnsetResult(onset_s, detected_idx / self.fs, True, self._trig_idx / self.fs)
 
     # A fitted rise this small, relative to the feature level and the threshold, is
     # numerical noise. ``polyfit`` on a flat window can return about +1e-17 instead of 0.
     _MIN_RISE_FRAC = 1e-6
 
     def _backdate(self, window: np.ndarray, confirm_idx: int) -> float:
-        """Line-fit onset in samples. Used for EMG, and as the IMU fallback.
+        """Line-fit onset in samples. The fallback for both detectors.
 
         Least-squares line through the last ``fit_s`` of the baseline-standardised feature,
         extrapolated to the baseline level. Only samples at or before ``confirm_idx`` are in
@@ -365,25 +488,79 @@ class _StreamDetector:
 
 
 class EmgOnsetDetector(_StreamDetector):
-    """Band-pass -> rectify -> causal low-pass envelope -> baseline+k*SD threshold."""
+    """Band-pass -> rectify -> causal low-pass envelope -> baseline+k*SD threshold and hold.
+
+    The hold says a burst is underway. ``refine_s`` later the onset is ``RampOnset`` on the
+    band-passed signal from ``lookback_s`` before the hold to the commit sample, scaled by the
+    baseline SD, minus the band-pass energy delay. A failed fit falls back to the line fit.
+    """
 
     def __init__(self, fs: float, params: EmgParams = EmgParams()):
         super().__init__(fs, params, two_sided=False)
         lo, hi = params.band_hz
         hi = min(hi, 0.45 * fs)
-        self._bp = self._sos_stream(
-            signal.butter(params.order, [lo, hi], btype="bandpass", fs=fs, output="sos"))
+        bp_sos = signal.butter(params.order, [lo, hi], btype="bandpass", fs=fs, output="sos")
+        self._bp = self._sos_stream(bp_sos)
         self._lp = self._sos_stream(
             signal.butter(params.order, params.envelope_hz, btype="lowpass", fs=fs, output="sos"))
         self._env: list[np.ndarray] = []
+        self._bp_hist: list[np.ndarray] = []
+        self._bp_delay_n = RampOnset.energy_delay_s(bp_sos, fs) * fs
+        self._rise_grid = np.arange(0.0, params.rise_max_s + 1e-9, params.rise_step_s)
+        self._gain_grid = np.geomspace(params.gain_range[0], params.gain_range[1], params.n_gain)
+        self._block = max(1, round(params.block_s * fs))
+        self._fit_end: int | None = None  # set by _confirm
 
     def _feature(self, x):
-        f = self._lp(np.abs(self._bp(x)))
+        b = self._bp(x)
+        self._bp_hist.append(np.asarray(b, dtype=float))
+        f = self._lp(np.abs(b))
         self._env.append(np.asarray(f, dtype=float))
         return f
 
     def _observed(self):
         return np.concatenate(self._env) if self._env else None
+
+    def _confirm(self, commit_idx: int) -> bool:
+        """Keep the trigger if a burst is still on at the commit, or was a clear short burst.
+
+        - Envelope above threshold at the commit: a burst is on. The onset fit runs to the commit.
+        - Envelope back below threshold, but its peak since the hold reached ``short_burst_peak``
+          (1.6) thresholds: an isolated short burst (e.g. 40-80 ms) that has ended. The onset fit
+          window ends at that envelope peak, so the post-burst baseline does not pull the
+          ramp model.
+        - Otherwise a noise excursion that met the 30 ms hold and decayed. The trigger is
+          dropped and the detector re-arms (``_rearm``).
+        """
+        sig = self._signed_history()
+        base_n = round(self.params.baseline_s * self.fs)
+        rel = commit_idx - base_n
+        self._fit_end = commit_idx
+        if not 0 <= rel < sig.size:
+            return False
+        if sig[rel] > self._thr:
+            return True
+        seg = sig[self._pending - base_n:rel + 1]
+        if seg.size == 0 or float(seg.max()) < self.params.short_burst_peak * self._thr:
+            return False
+        self._fit_end = self._pending + int(np.argmax(seg))
+        return True
+
+    def _onset_samples(self, commit_idx: int) -> float:
+        p = self.params
+        if self._fit_end is not None:
+            commit_idx = min(commit_idx, self._fit_end)  # a short burst's fit ends at its peak
+        bp = np.concatenate(self._bp_hist)
+        base_n, settle_n = round(p.baseline_s * self.fs), round(p.settle_s * self.fs)
+        sd = float(np.std(bp[settle_n:base_n], ddof=1)) if base_n - settle_n > 1 else 0.0
+        w0 = max(base_n, self._trig_idx - round(p.lookback_s * self.fs))
+        est = None
+        if np.isfinite(sd) and sd > 0 and commit_idx < bp.size:
+            est = RampOnset.estimate(bp[w0:commit_idx + 1] / sd, self.fs, self._rise_grid, self._gain_grid,
+                                     self._block)
+        if est is None:
+            return self._backdate(self._trig_window, self._trig_idx)
+        return float(max(w0 + est - self._bp_delay_n, base_n))
 
 
 class ImuOnsetDetector(_StreamDetector):

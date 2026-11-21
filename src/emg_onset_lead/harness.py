@@ -25,7 +25,8 @@ class TrialResult:
     margin_ms: float  # lead_ms - required latency
     true_lead_ms: float = NAN  # only when the source supplies meta["true_lead_ms"]
     detect_lead_ms: float = NAN  # confirmation-time difference; diagnostic, not gated
-    emg_confirmation_delay_ms: float = NAN  # EMG detected_s - onset_s; added to the budget only if triggered
+    # EMG trigger_s (hold met) - onset_s; added to the budget only if triggered
+    emg_confirmation_delay_ms: float = NAN
     baseline_rest_ok: bool = True
 
 
@@ -65,9 +66,18 @@ class Harness:
 
     @staticmethod
     def _confirmation_delay_ms(emg_result) -> float:
-        if emg_result.onset_s is None or emg_result.detected_s is None or not emg_result.baseline_rest_ok:
+        """Hold time minus back-dated onset: what a triggered controller waits.
+
+        A triggered controller fires when the hold is met (``trigger_s``). The EMG onset
+        estimate commits ``refine_s`` later, but the controller does not need it to act, so
+        that wait is not part of the confirmation delay.
+        """
+        if emg_result.onset_s is None or not emg_result.baseline_rest_ok:
             return NAN
-        return (emg_result.detected_s - emg_result.onset_s) * 1000.0
+        t = emg_result.trigger_s if emg_result.trigger_s is not None else emg_result.detected_s
+        if t is None:
+            return NAN
+        return (t - emg_result.onset_s) * 1000.0
 
     @staticmethod
     def write_csv(results: list[TrialResult], path: Path) -> None:
