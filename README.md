@@ -75,8 +75,9 @@ Why 1.6 (synthetic; Fact Checker's factor sweep, PR #4 round 2, 499 h of white n
   0.60/h at 1.5x -> 0.28/h at 1.6x. At +20%: 63/h -> 47/h. About half of that comes from the
   pre-existing path (envelope still above threshold at the commit), which this factor cannot fix.
 
-Isolated bursts with a 20 ms rise peak above 2.7x at SNR >= 5. At SNR 3 / 40 ms the median peak
-is 2.3x and the minimum 1.2x. Without any commit check, FC's
+The envelope peaks of real bursts do not depend on the factor. Re-measured at this head with
+confirmation forced (60 trials, `default_rng(1)`, synthetic): 20 ms-rise isolated bursts peak at
+>= 2.7x at SNR >= 5. At SNR 3 / 40 ms the median peak is 2.3x and the minimum 1.2x. Without any commit check, FC's
 generator produced about one onset in noise per ~3000 trials, hundreds of ms early. The
 previous check (envelope above threshold at the commit) dropped every isolated 40-60 ms burst.
 Isolated bursts at 1.6x (synthetic; 20 ms linear rise, test generator and seed,
