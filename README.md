@@ -76,7 +76,8 @@ Isolated bursts detected, 20 ms rise, 60 trials (synthetic): 60/60 at SNR 3/5/15
 within +/-3 ms in every cell (`tests/test_emg_short_burst.py`).
 
 Results (synthetic only; full table in the PR): on FC's generator (linear amplitude ramp), rise
-10/20/40/80/150 ms x SNR 3/5/15/30, every cell's mean EMG onset error is within 2.3 ms. Its 95% CI
+10/20/40/80/150 ms x SNR 3/5/15/30, every cell's mean EMG onset error is within about 3.3 ms (max |mean| 2.23 ms on the test's
+seed; Fact Checker measured -3.32 ms at 10 ms / SNR 3, n 200, on another seed). Its 95% CI
 is within +/-6 ms at 200 trials per cell (SNR 3-5) and 80 (SNR 15-30); `tests/test_emg_grid.py`.
 Per-trial SD is 1-3.5 ms at SNR 15-30 but 5-14 ms at SNR 3, rising with rise time (about 14.2-14.5 ms at
 150 ms / SNR 3; one 40-trial draw showed 16.6). At low SNR the
