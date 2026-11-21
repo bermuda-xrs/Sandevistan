@@ -44,7 +44,8 @@ Kinematic onset is synthetic-only. Unverified on real motion until a bench move 
 EMG onset (synthetic): FC's rise 10-150 ms x SNR 3-30 grid holds every cell's mean and 95% CI inside +/-6 ms
 at 200/80 trials per cell (`tests/test_emg_grid.py`); at FC's 40 trials the 150 ms / SNR 3 CI reaches -7.3 ms. An S-curve burst reads late by ~10% of its rise (strict xfails). Per-trial SD is
 5-14 ms at SNR 3. Isolated 40-80 ms bursts: >= 96% detected except 40 ms / SNR 3 (71-81% over test seeds 0-9, 243/300 at 300 trials; synthetic);
-`tests/test_emg_short_burst.py`.
+`tests/test_emg_short_burst.py`. Its 65% bound for 40 ms / SNR 3 is a loose regression guard: it catches a drop to about
+60% or below, not small changes (measured 107-121/150 over seeds 0-9; synthetic).
 In-family bias (synthetic, `scripts/bias_guard_band.py`, 16x3x10 SyntheticSource, seeds 0-5): -3.93 ms
 (95% CI over seeds [-4.05, -3.81]); option C u = 0.139 ms, w = k*u -> gate 68.81/68.95/69.09 ms (k = 1/2/3).
 u covers detector noise on one burst shape only. Rise/shape dependence (about -0.3 to -14.5 ms) dominates

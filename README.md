@@ -72,12 +72,15 @@ Why 1.6 (synthetic; Fact Checker's factor sweep, PR #4 round 2, 499 h of white n
 - The cost is short-burst detection at 40 ms / SNR 3: 246 -> 234 of 300. Every other short-burst
   cell stays at 297-300/300.
 - With a noise floor 10-20% above the baseline the floor dominates, not the factor. At +10%:
-  0.60/h at 1.5x -> 0.28/h at 1.6x. At +20%: 63/h -> 47/h. About half of that comes from the
-  pre-existing path (envelope still above threshold at the commit), which this factor cannot fix.
+  0.60/h at 1.5x -> 0.28/h at 1.6x. At +20%: 63/h -> 47/h. About 67% of the 47/h at 1.6x
+  (31.5/h) comes from the pre-existing path (envelope still above threshold at the commit), which
+  this factor cannot fix.
 
 The envelope peaks of real bursts do not depend on the factor. Re-measured at this head with
-confirmation forced (60 trials, `default_rng(1)`, synthetic): 20 ms-rise isolated bursts peak at
->= 2.7x at SNR >= 5. At SNR 3 / 40 ms the median peak is 2.3x and the minimum 1.2x. Without any commit check, FC's
+confirmation forced (60 trials per cell, `default_rng(1)` restarted per cell, synthetic): the
+lowest peak of a 20 ms-rise isolated burst at SNR >= 5 was 2.696x (SNR 5 / 40 ms). That is the
+measured minimum of one stream, not a bound. At SNR 3 / 40 ms the median peak is 2.3x and the
+minimum 1.2x. Without any commit check, FC's
 generator produced about one onset in noise per ~3000 trials, hundreds of ms early. The
 previous check (envelope above threshold at the commit) dropped every isolated 40-60 ms burst.
 Isolated bursts at 1.6x (synthetic; 20 ms linear rise, test generator and seed,
@@ -92,6 +95,10 @@ Isolated bursts at 1.6x (synthetic; 20 ms linear rise, test generator and seed,
 
 At 60 trials (FC's short-burst form, 40-150 ms) every cell is 60/60 except SNR 3 / 40 ms at
 49/60 (base 608a151: 58/60). The mean onset error is within +/-3 ms in every cell.
+
+The 65% detection bound for 40 ms / SNR 3 in `tests/test_emg_short_burst.py` is a loose
+regression guard. It catches a drop to about 60% or below, not small changes. Measured over test
+seeds 0-9: 107-121/150 (synthetic).
 
 Results (synthetic only; full table in the PR): on FC's generator (linear amplitude ramp), rise
 10/20/40/80/150 ms x SNR 3/5/15/30, every cell's mean EMG onset error is within about 3.3 ms (max |mean| 2.23 ms on the test's

@@ -57,9 +57,10 @@ class EmgParams(OnsetParams):
     # A burst that has already ended by the commit is kept if its envelope peaked at least this many
     # thresholds (baseline-removed). Tradeoff (FC, synthetic white noise, 499 h): false onsets fall
     # from 0.016/h at 1.5x to 0.008/h at 1.6x (noise triggers peaked up to ~1.73x); the cost is
-    # 40 ms / SNR 3 short-burst detection 246 -> 234 of 300. 40-80 ms bursts at SNR >= 5 peak at
-    # >= 2.7x (a property of the burst, not of this factor). A noise floor 10-20% above baseline
-    # dominates over this factor (see README).
+    # 40 ms / SNR 3 short-burst detection 246 -> 234 of 300. The lowest 40-80 ms burst peak at
+    # SNR >= 5 was 2.696x (one stream: 60 trials, default_rng(1); a measured minimum, not a bound;
+    # a property of the burst, not of this factor). A noise floor 10-20% above baseline dominates
+    # over this factor (see README).
     short_burst_peak: float = 1.6
 
 
