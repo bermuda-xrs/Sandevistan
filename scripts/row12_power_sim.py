@@ -376,6 +376,14 @@ def cmd_report(a):
         m = t[0] / t[2]
         return m, np.sqrt((t[1] - t[2] * m * m) / (t[2] - 1)), int(t[3])
 
+    L += ["", f"### Baseline five-row table (no correction), {N_ADDENDUM}x3x10, fixed seeds", "",
+          f"| Rise | Power at {TRUE_POWER} ms | False pass at {TRUE_NULL} ms | Mean lead err (ms) |",
+          "|---|---|---|---|"]
+    for r in ADDENDUM_RISES:
+        kp = sum(s[f"raw_r{r}_L{TRUE_POWER}"] for s in S)
+        kf = sum(s[f"raw_r{r}_L{TRUE_NULL}"] for s in S)
+        L.append(f"| {r} ms | {fmt(kp, N)} | {fmt(kf, N)} | "
+                 f"{np.mean([s[f'err_r{r}_L{TRUE_POWER}'] for s in S]):+.2f} |")
     for title, Lv, lab in ((f"Power, true lead {TRUE_POWER} ms (row 12)", TRUE_POWER, "Power"),
                            (f"False pass, true lead exactly {TRUE_NULL} ms (nominal 0.05)", TRUE_NULL,
                             "False pass")):
