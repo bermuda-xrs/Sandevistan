@@ -130,19 +130,20 @@ and a nested ANOVA (subject > session > trial). It reports:
 This is the same method as `bias_split.py` on analysis/emg-polarity-bias (3e9c27b).
 
 Values at this checkout (synthetic):
-- **bias = -3.93 ms** (lead reads short). The seed-to-seed SD is 0.12 ms, and the 95% CI over
-  6 seeds is [-4.05, -3.81] ms.
-- **u = 0.139 ms** (range 0.087-0.180 over seeds). u_new_subject = 0.649 ms.
-- Guard band w = k*u: 0.14 / 0.28 / 0.42 ms for k = 1/2/3, so a gate of 68.81 / 68.95 /
-  69.09 ms. With u_new_subject: 69.32 / 69.97 / 70.62 ms.
+- **bias = -3.927 ms** (lead reads short). The seed-to-seed SD is 0.070 ms, and the 95% CI over
+  6 seeds is [-4.000, -3.854] ms.
+- **u = 0.135 ms** (range 0.097-0.166 over seeds). u_new_subject = 0.637 ms.
+- Guard band w = k*u: 0.135 / 0.270 / 0.405 ms for k = 1/2/3, so a gate of 68.805 / 68.940 /
+  69.075 ms. With u_new_subject: 69.307 / 69.944 / 70.580 ms.
 
-These replace the stale base-608a151 values (bias +0.35 ms, u = 0.17 ms).
+These replace the stale base-608a151 values (bias +0.35 ms, u = 0.17 ms), and the values from before
+the `SyntheticSource` seed fix (bias -3.93 ms, 95% CI [-4.05, -3.81], u = 0.139 ms).
 
 Uncertainty: u and the seed spread cover only detector noise on this one synthetic burst shape.
 They do not cover shape or rise time, which dominate. On smoothstep bursts at SNR 15 the bias
 runs from about -0.3 ms (10 ms rise) to -14.5 ms (150 ms rise); Fact Checker PR #4, table B.
 The real rise-time distribution is unknown (no recorded EMG). Option C only raises the gate
-(68.67 + w). The -3.93 ms lateness already uses about 4 of the 6 ms margin, so any w > 0 cuts
+(68.67 + w). The -3.927 ms lateness already uses about 4 of the 6 ms margin, so any w > 0 cuts
 power further. If option C instead added an estimated bias back, a wrong estimate would be
 anti-conservative.
 
@@ -188,10 +189,25 @@ pip install -e .[test]
 pytest
 python -m emg_onset_lead run --synthetic --subjects 16 --sessions 3 --seed 0 --out out/
 ```
-That command is a **single-seed demo**. Seed 0's subject-mean spread can be a couple of milliseconds
-against a design SD of about 8.91 ms (`SampleSize.design_subject_sd` with subject/session/trial SDs
-8/6/10 ms, 3 sessions, 10 trials). Pass `--seeds 6` to pool seeds 0..5. Writes `out/trials.csv` and
+That command is a **single-seed demo**. Its subject-mean SD is one draw from 16 subjects. Over seeds
+0-5 that SD is 6.89-9.53 ms for the true lead and 6.86-9.39 ms for the detected lead (synthetic), against a
+design SD of 8.91 ms (`SampleSize.design_subject_sd` with subject/session/trial SDs 8/6/10 ms,
+3 sessions, 10 trials). Pass `--seeds 6` to pool seeds 0..5. Writes `out/trials.csv` and
 `out/summary.json`.
+
+`SyntheticSource` seeds each subject, session and trial from its own node of a `SeedSequence` spawn
+tree. Until that fix, the subject used `default_rng([seed, s])` and session 0 used
+`default_rng([seed, s, 0])`. numpy pads a seed list shorter than its 4-word pool with zeros, so
+those were the same stream: session 0's offset was 0.75x the subject offset. Subject-mean true-lead
+SD, 16x3x10 (synthetic; `scripts/synthetic_source_spread.py`, `--pool-seeds 400` for the second row):
+
+| pooled seeds | subjects | old seeding (95% CI) | now (95% CI) |
+|---|---:|---|---|
+| 0-39 | 640 | 10.55 ms [10.01, 11.17] | 9.14 ms [8.66, 9.67] |
+| 0-399 | 6400 | 10.59 ms [10.41, 10.77] | 8.96 ms [8.81, 9.12] |
+
+In theory it is 10.55 ms with the old seeding and 8.91 ms with independent streams.
+`tests/test_synthetic_source_seeds.py` guards this.
 
 The latency budget is 18.67 ms IMU path + 50 ms EMG extra = 68.67 ms. `--imu-path-ms` is the only
 way to change it. `--total-latency-ms` is a check only. It must equal the IMU path + 50 ms, and a
