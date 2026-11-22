@@ -1,9 +1,10 @@
 """Seeding and variance components of scripts/row12_power_sim.py. Synthetic data only.
 
-The old row-12 generator seeded sessions with ``default_rng([seed, i, j])``. SeedSequence drops
-trailing zeros, so session 0 reused the subject's stream (session-0 offset = 0.75 x subject offset,
-subject-mean SD 10.57 ms instead of 8.91). ``test_legacy_scheme_fails_the_check`` keeps that scheme
-as a negative control: the same check must reject it.
+The old row-12 generator seeded sessions with ``default_rng([seed, i, j])``. SeedSequence pads a seed
+list shorter than its 4-word pool with zeros, so session 0 reused the subject's stream (session-0
+offset = 0.75 x subject offset, subject-mean SD 10.57 ms instead of 8.91).
+``test_legacy_scheme_fails_the_check`` keeps that scheme as a negative control: the same check must
+reject it.
 """
 
 import importlib.util

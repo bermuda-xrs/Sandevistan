@@ -5,7 +5,7 @@
 Script: `scripts/row12_power_sim.py`. Test: `tests/test_row12_power_sim_seeds.py`. This replaces the earlier scratch results (16 subjects: 0.72 at 10 ms rise, 0.54 at 20 ms; "21-23 / 30-31 subjects"), which are **withdrawn**.
 
 ## What was wrong
-The scratch generator seeded the subject with `default_rng([seed, i])` and the session with `default_rng([seed, i, j])`. SeedSequence drops trailing zeros, so session 0 reused the subject stream: its offset was exactly 0.75 x the subject offset, and the SD of a subject mean was 10.55 ms (theory) instead of 8.91. Fact Checker (FC) found this. The earlier explanation for the gap to the analytic power ("detector noise") was wrong.
+The scratch generator seeded the subject with `default_rng([seed, i])` and the session with `default_rng([seed, i, j])`. numpy's SeedSequence pads a seed list shorter than its pool (4 words of 32 bits by default) with zeros ([`mix_entropy`](https://github.com/numpy/numpy/blob/v2.5.5/numpy/random/bit_generator.pyx#L363-L370)), so `[seed, i]` and `[seed, i, 0]` are the same seed. A list that already fills the pool is different: `[1, 2, 3, 4]` and `[1, 2, 3, 4, 0]` are not the same seed. So session 0 reused the subject stream: its offset was exactly 0.75 x the subject offset, and the SD of a subject mean was 10.55 ms (theory) instead of 8.91. Fact Checker (FC) found this. The earlier explanation for the gap to the analytic power ("detector noise") was wrong.
 
 ## Method
 - Seeds are a SeedSequence spawn-key tree: study -> subject -> session -> trial.
