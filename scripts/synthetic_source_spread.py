@@ -11,6 +11,9 @@ Then, at this checkout only, with the detectors at default settings:
   3. the lead error of ``tests/test_harness.py::test_recovers_known_lead`` (8x3x5, seeds 0-5).
   4. the EMG confirmation delay of ``test_triggered_mode_adds_confirmation_delay`` (4x2x5, seed 0)
      and of the planned 16x3x10 study, seed 0.
+  5. the lead bias at that 8x3x5 size and at the planned 16x3x10 (seeds 0-5), and whether they differ.
+     The 8x3x5 trials are a subset of the 16x3x10 trials (a trial does not depend on the study size;
+     asserted here), so the subset is compared with the remaining trials.
 The in-family bias and guard band come from ``scripts/bias_guard_band.py``.
 
 Usage (repo root):  python scripts/synthetic_source_spread.py [--pool-seeds 40] [--out out.md]
@@ -87,6 +90,39 @@ def recovers_known_lead() -> tuple[np.ndarray, float]:
     return np.array([e.mean() for e in errs]), float(np.concatenate(errs).mean())
 
 
+def bias_by_size() -> dict:
+    """Lead error (ms) of seeds 0-5, 16x3x10, split into the nested 8x3x5 trials and the rest.
+
+    Mean of the per-trial errors; CIs are t intervals over the 6 seed means.
+    """
+    n_subj, n_sess = PLANNED_SHAPE
+    inner, outer, full, planned = [], [], [], []
+    for seed in range(6):
+        res = Harness.run(SyntheticSource(n_subjects=n_subj, n_sessions=n_sess, n_trials=N_TRIALS, seed=seed))
+        e = np.array([r.lead_ms - r.true_lead_ms for r in res]).reshape(n_subj, n_sess, N_TRIALS)
+        mask = np.zeros_like(e, bool)
+        mask[:8, :, :5] = True
+        small = Harness.run(SyntheticSource(n_subjects=8, n_sessions=3, n_trials=5, seed=seed))
+        np.testing.assert_array_equal(e[mask], [r.lead_ms - r.true_lead_ms for r in small])
+        inner.append(e[mask])
+        outer.append(e[~mask])
+        full.append(e.ravel())
+        planned.append(np.nanmean(e, axis=2).mean())  # as bias_guard_band.py: session, then subject means
+
+    def ci(x):
+        x = np.array(x)
+        h = stats.t.ppf(0.975, x.size - 1) * x.std(ddof=1) / np.sqrt(x.size)
+        return float(x.mean()), float(x.mean() - h), float(x.mean() + h)
+
+    m_in, m_out, m_full = ([np.nanmean(x) for x in part] for part in (inner, outer, full))
+    diff = np.array(m_in) - np.array(m_out)
+    return dict(inner=ci(m_in), outer=ci(m_out), full=ci(m_full), planned=ci(planned), diff=ci(diff),
+                p=float(stats.ttest_1samp(diff, 0.0).pvalue),
+                n_inner=sum(x.size for x in inner), n_outer=sum(x.size for x in outer),
+                missed=int(sum(np.isnan(x).sum() for x in full)),
+                pooled_inner=float(np.nanmean(np.concatenate(inner))))
+
+
 def delay(n_subj: int, n_sess: int, n_trials: int) -> dict:
     res = Harness.run(SyntheticSource(n_subjects=n_subj, n_sessions=n_sess, n_trials=n_trials, seed=0))
     return LeadStats.summarize(res, LatencyConfig(), n_boot=30)["confirmation_delay_ms"]
@@ -120,6 +156,18 @@ def report(pool_seeds: int) -> str:
     for shape in ((4, 2, 5), (n_subj, n_sess, N_TRIALS)):
         d = delay(*shape)
         L.append(f"- {shape[0]}x{shape[1]}x{shape[2]}: {d['mean']:.2f} ms ({d['min']:.2f}-{d['max']:.2f})")
+    b = bias_by_size()
+    L += ["", "### 5. Lead bias by study size, seeds 0-5 (t 95% CI over seed means)", "",
+          "| trials | n | bias (ms) | 95% CI |", "|---|---:|---:|---|"]
+    for name, key, n in (("16x3x10, mean of subject means (bias_guard_band.py)", "planned", None),
+                         ("16x3x10, mean of trials", "full", b["n_inner"] + b["n_outer"]),
+                         ("8x3x5 (subset of the 16x3x10 trials)", "inner", b["n_inner"]),
+                         ("the other 16x3x10 trials", "outer", b["n_outer"]),
+                         ("8x3x5 minus the others, paired by seed", "diff", None)):
+        m, lo, hi = b[key]
+        L.append(f"| {name} | {n if n else ''} | {m:+.3f} | [{lo:+.3f}, {hi:+.3f}] |")
+    L += ["", f"t test of the difference over 6 seeds: p = {b['p']:.3f}. 8x3x5 pooled over trials "
+          f"{b['pooled_inner']:+.3f} ms. Missed trials: {b['missed']}."]
     return "\n".join(L) + "\n"
 
 
