@@ -1,0 +1,216 @@
+# B-A15 arm-drop test plan (written plan, no trials run)
+
+**Status: draft for Fact Checker. No human or bench trial has been run. No human trial may start before ethics (IRB) approval (section 2).**
+
+- Every number comes from `scripts/ba15_numcheck.py` (output: `docs/ba15_numbers.json`). This file is rendered from `scripts/ba15_testplan.template.md`; do not edit it by hand.
+- Numbers marked **SYNTHETIC** come from the drop model or from an extrapolation through it. They are not bench or human data. Sample-size numbers are exact binomial calculations, not simulations.
+- **ASSUMPTION** marks anything with no source. The full list is in section 8.
+- The window edges and FC's drop range are SYNTHETIC wherever they appear.
+- "FC" is Fact Checker, "HE" is Hardware Engineer, "STO" is safe torque off. Citations are in the References.
+
+## Short version
+
+1. **Window (Charlie, 1a):** one fixed relaxed-hold catch-time window for every subject, {{in.win_lo|.2f}}–{{in.win_hi|.2f}} ms (SYNTHETIC). No per-subject recompute.
+2. **Pass rule (Charlie, 2b):** show P(drop past {{in.drop|.0f}}°) ≤ {{in.p0|pct}} at {{in.conf|pct}} one-sided confidence with zero drops in {{in.n0}} independent trials.
+3. **Subjects:** with {{in.m}} trials each, {{stat.range_he.0}} to {{stat.range_he.2}} subjects for an ICC of 0 to {{in.icc|g}}; {{stat.plan.subjects_any}} for any ICC. Planning default: {{stat.plan.subjects}} subjects × {{in.m}} trials (ICC {{in.icc|g}}, ASSUMPTION).
+4. **Any drop:** stop, investigate, and the test has FAILED. No extension unless it was registered before trial 1.
+5. **Feasibility: this plan will almost certainly fail on the current design.** If the true drop probability is FC's {{in.fc_lo|pct}}–{{in.fc_hi|pct}}, the chance of passing is at most {{syn.feas.max_pass|.1e}} (SYNTHETIC) (about one in {{syn.feas.one_in|,.0f}}) over every ICC, trials-per-subject and allowed-drop option in this plan. Section 6 says what that means.
+
+## 1. What is tested
+
+B-A15 is the project's human catch model: the user arrests the arm at exactly {{in.catch|.0f}} ms after fault onset. It has no human data behind it (ASSUMPTION). The {{in.drop|.0f}}° drop limit (B9) has no human-safety source either (ASSUMPTION): the S7 search found none and FC verified that (`S7_verdict.md` row 14).
+
+**The fixed window.** Arm horizontal (elbow 90°), user hold torque zero ("relaxed"). The drop model (torque basis: ramp on the device side, times k = {{in.k|.4f}} at the arm) reaches {{in.drop|.0f}}° at:
+
+| Edge (SYNTHETIC) | Converged value | Decided value | Governing cell |
+|---|---|---|---|
+| Lower: design (b), SYNTHETIC | {{syn.lo|.4f}} ms | {{in.win_lo|.2f}} ms | e-stop, ramp {{in.rate|.2f}} N·m/s, STO {{in.sto|.0f}} ms |
+| Upper: backup (iv), SYNTHETIC | {{syn.hi|.4f}} ms | {{in.win_hi|.2f}} ms | comm loss, ramp {{in.rate_iv|.2f}} N·m/s, STO {{in.sto_comm|.0f}} ms |
+
+- Both decided values (SYNTHETIC) reproduce at two decimals. The lower one is rounded down by {{ref.lo_round_down_ms|.4f}} ms (safe side); the upper one is rounded up by {{ref.hi_round_up_ms|.4f}} ms (not the safe side, but far below the {{in.res|g}} ms timing resolution).
+- The lower edge is the earliest crossing over all {{syn.n_cells_b}} (b) cells (path × rate tolerance × STO band). The next paths cross later: comm loss {{syn.lo_comm|.2f}} ms, EMG loss {{syn.lo_emg|.2f}} ms (SYNTHETIC).
+- Margin over the {{in.catch|.0f}} ms catch: {{syn.margin_ms|.2f}} ms. Drop at {{in.catch|.0f}} ms: {{syn.drop200|.2f}}°. Arm speed at {{in.drop|.0f}}°: {{syn.w10|.0f}} °/s (all SYNTHETIC).
+- This decision replaces, for this test only, the Rev U row 14 rule that recomputes the window from each measured hold torque. One reason it cannot be recomputed well: a ±{{in.g_unc|pct}} error in a subject's gravity moment (ASSUMPTION) is {{syn.hold_unc|.2f}} N·m, {{syn.hold_unc_ratio|.2f}} times the whole nominal hold of {{syn.hold_nom|.3f}} N·m (SYNTHETIC).
+- **Limit of one window.** A subject whose gravity moment is one percent above the model crosses {{in.drop|.0f}}° {{syn.dG_1pct|+.2f}} ms from the edge (minus is earlier); one percent more inertia moves it {{syn.dJ_1pct|+.2f}} ms (SYNTHETIC). The window is only {{syn.width|.2f}} ms wide (SYNTHETIC). So the trial score below also uses the directly measured angle.
+
+## 2. Ethics and safety before any trial
+
+- **Human testing needs ethics (IRB) approval before any trial**, including pilots and familiarisation. The Declaration of Helsinki, paragraph 23, requires the protocol to be approved by a research ethics committee before the research begins [WMA24]. Where US rules apply, the IRB approves, requires changes to, or disapproves the research [CFR46]. Which law applies here is not known (ASSUMPTION: whichever applies, approval comes first).
+- The IRB must see section 6. Exposing people to repeated arm drops in a test that is expected to fail is a risk with little expected benefit.
+- Inclusion and exclusion criteria, consent text, medical cover and the adverse-event definition are for the IRB protocol. This plan does not set them (open item).
+- Passive stop below the arm at {{in.stop|.0f}}° (ASSUMPTION, HE scoping). In the governing cell an uncaught arm reaches it at {{syn.t_stop|.1f}} ms and {{syn.w_stop|.0f}} °/s (SYNTHETIC). The stop's absorber must be proven on the dummy before any person uses the rig.
+
+## 3. Procedure
+
+**Phase A: dummy arm, no people.**
+1. Build the rig with a dummy forearm, start latch, angle sensor, torque sensor, passive stop and independent torque trip.
+2. Calibrate. Prove timing uncertainty U_t ≤ {{in.res|g}} ms and angle uncertainty ≤ {{syn.ang_res|.4f}}° (SYNTHETIC: {{in.res|g}} ms at the model's {{in.drop|.0f}}° speed).
+3. Run the governing cell. The dummy's measured {{in.drop|.0f}}° crossing must agree with the model within {{in.tol_model|g}} ms (ASSUMPTION, HE scoping). If it does not, the fixed window is wrong: stop and go to Charlie (via Seren).
+4. Prove the passive stop and the torque trip.
+
+**Gate to Phase B:** Phase A passed, IRB approval in hand, ICC / trials per subject / allowed drops registered, and Charlie's explicit go after reading section 6.
+
+**Phase B: people.**
+1. One test cell only: e-stop fault, ramp {{in.rate|.2f}} N·m/s, STO {{in.sto|.0f}} ms, relaxed hold. It has the earliest model crossing, so a given catch time is hardest to pass there (ASSUMPTION: a subject's catch time does not depend on which path failed). **A pass covers only the cell tested.** To claim each path separately, each needs its own full sample.
+2. Seat the subject, elbow at 90°, payload in hand, forearm resting on the start latch. A relaxed arm would sag before the fault, because the device carries slightly less than the arm's weight, so the latch must hold it and release at fault onset (ASSUMPTION: release adds no usable cue).
+3. Tell the subject to relax and to stop the arm only if it falls. Use no countdown and mask sound.
+4. Random wait of 1 to 4 s before onset, as in [PRU09]. Mix in sham releases (latch opens, no fault) at random, one sham per fault trial (ASSUMPTION). A relaxed arm still sags slowly in a sham, so shams are never scored.
+5. Fault onset is time zero. The catch time is from onset to arrest complete (arm speed zero), as in Rev U row 14.
+6. Reset, rest, repeat up to {{in.m}} fault trials. Rest length is open.
+7. No practice with the real fault. The unprepared user is the hazard, and [PRU09] subjects were practised. Trial number is logged so a learning trend can be seen.
+
+**Trial score (fixed before trial 1).** Let t_c be the measured catch time and U_t the proven timing uncertainty.
+
+| Score | Rule |
+|---|---|
+| **DROP** | t_c + U_t > {{in.win_lo|.2f}} ms (SYNTHETIC edge), **or** measured peak drop + angle uncertainty > {{in.drop|.0f}}°, **or** the passive stop is touched |
+| **NO DROP** | valid trial and none of the above |
+| **INVALID** | rig fault (ramp slower than {{in.rate|.2f}} N·m/s, STO later than {{in.sto|.0f}} ms, lost sensor or clock), or EMG activity before onset showing the subject was not relaxed |
+
+- Using both time and angle makes the score stricter than either alone, so a pass holds for both readings of "drop past {{in.drop|.0f}}°" (ASSUMPTION: this is how 1a and 2b combine; for FC and Charlie to confirm).
+- Not relaxed means the repo EMG onset detector, at its unchanged defaults, fires during the wait (ASSUMPTION).
+- INVALID is decided from pre-onset and rig channels only, by someone who has not seen the angle trace after onset. Invalid trials are repeated and all are reported. **A drop in an invalid trial still triggers the stop rules.**
+- The rig may not be easier than the cell. Going past it by one percent in ramp rate moves the crossing {{syn.drate_1pct|+.2f}} ms, and STO one ms early moves it {{syn.dsto_1ms|+.2f}} ms (SYNTHETIC). The allowed overshoot is open.
+
+## 4. Sample size
+
+**Independent trials.** Zero drops in n shows P ≤ {{in.p0|pct}} at {{in.conf|pct}} one-sided confidence when the chance of zero drops at exactly {{in.p0|pct}} is at most {{in.p0|pct}} (the exact one-sided Clopper–Pearson bound [CP34]; zero-event case [HL83]). {{in.n0}} is the smallest such n: at n = {{in.n0}} the chance is {{stat.q59|.5f}}; one trial fewer gives {{stat.q58|.5f}}. **Verified.**
+
+**Repeated trials in one subject are correlated.** The design effect is DE = 1 + (m − 1)·ICC, for m trials per subject. Effective sample size = trials / DE [DBB81, RS92]. We checked the formula on the published example in [KMP04] (DE {{stat.killip.deff|.3f}}, effective size {{stat.killip.ess|.1f}}; the paper gives the same DE and a rounded size). Subjects = ceil(n·DE/m). Entries are subjects (total fault trials):
+
+{{table:subjects}}
+
+- **The earlier estimate of {{stat.range_he.0}}–{{stat.range_he.2}} subjects is reproduced**, for m = {{in.m}} and ICC {{stat.range_icc.0|g}}, {{stat.range_icc.1|g}} and {{stat.range_icc.2|g}}: {{stat.range_he.0}}, {{stat.range_he.1}}, {{stat.range_he.2}}. **It is not an upper bound.** It stops at ICC {{stat.range_icc.2|g}} and assumes m = {{in.m}}. Over the full ICC range 0 to 1 it becomes {{stat.range_he.0}} to {{stat.plan.subjects_any}}. No source gives the ICC of arm drops (ASSUMPTION).
+- **Is the design effect safe for a zero-drop test?** It is a variance correction, so we checked it exactly at P = {{in.p0|pct}}, m = {{in.m}}, against (a) a beta-binomial model [W75] and (b) the worst case over every possible mix of subject drop rates with that mean and ICC. The worst case (some subjects at one rate, the rest never dropping) is confirmed by a linear program (they agree within {{in.lp_tol|.0e}}):
+
+{{table:check}}
+
+- The design effect is enough in every row. On a grid of ICC 0 to 1 in steps of one hundredth it stays enough for every m up to {{stat.deff_ok_to_m}}, and first falls short at the next m. **Do not use more than {{stat.deff_ok_to_m}} trials per subject with this formula.**
+- **Too small an ICC breaks the test.** Sizing for ICC 0 ({{stat.range_he.0}} subjects) when the truth is {{in.icc|g}} gives a false-pass chance of {{stat.misspec.0|pct}} (beta-binomial) to {{stat.misspec.1|pct}} (worst case), not {{in.p0|pct}}.
+- **A passing data set cannot tell you its ICC:** with zero drops there is no variation to estimate it from. So the ICC must be fixed before trial 1. A pilot could measure the ICC of catch time. If catch times are normal (ASSUMPTION), a catch-time ICC of {{stat.latent_icc.0|g}}, {{stat.latent_icc.1|g}}, {{stat.latent_icc.2|g}} or {{stat.latent_icc.3|g}} gives a drop ICC of {{stat.latent.0|.2f}}, {{stat.latent.1|.2f}}, {{stat.latent.2|.2f}} or {{stat.latent.3|.2f}} at {{in.p0|pct}}.
+
+**Planning default:** {{stat.plan.subjects}} subjects × {{in.m}} trials = {{stat.plan.trials}} fault trials (DE {{stat.plan.deff|g}}). The {{in.m}} trials come from Rev U row 14 and the ICC of {{in.icc|g}} is the top of the earlier range; both are ASSUMPTIONS.
+**Recommended alternative for Charlie:** {{in.n0}} subjects × one trial. It needs no ICC assumption, has the fewest fault trials ({{in.n0}}) and tests the unprepared first response. It needs more people and does not meet Rev U's ten-trials-per-subject floor.
+
+## 5. Pass, fail and stop rules
+
+**PASS:** every planned valid trial done, zero DROP scores.
+**FAIL:** any DROP score.
+
+**If a drop occurs**
+1. **Stop** the session and all enrolment at once. Check on the subject. Report as the IRB requires.
+2. **Investigate** before anything else: rig, ramp, STO, hold, catch time, angle.
+3. **The zero-drop test has FAILED.** A drop is never removed afterwards. Report the exact one-sided upper bound: one drop in {{in.n0}} independent trials gives P ≤ {{stat.cp.1|pct}}; two give {{stat.cp.2|pct}}.
+4. **No extending after the fact.** "Add trials and allow one drop" chosen after seeing the drop has a false-pass chance of {{stat.naive1|pct}} ({{stat.n0}} then {{stat.n1}}) or {{stat.naive2|pct}} ({{stat.n0}}, {{stat.n1}}, then {{stat.n2}}), not {{in.p0|pct}}.
+5. **Where the drop falls** (from t_c; SYNTHETIC edges; decides who is told what, not a pass): above {{in.win_lo|.2f}} and up to {{in.win_hi|.2f}} ms, (b) has failed and (iv) becomes the candidate. (iv) needs Charlie's switch decision and its own new full test in its own cell. Above {{in.win_hi|.2f}} ms both fail: escalate to Charlie (via Seren).
+6. **Retest** only after a documented design change, from zero. Trying again without a change until it passes gives a false-pass chance of {{stat.retest.0|pct}} over two tries and {{stat.retest.1|pct}} over three.
+
+**Allowed-drop plans** (must replace the zero-drop plan before trial 1, never after a drop). m = {{in.m}}, subjects by design effect:
+
+{{table:allowed}}
+
+The design effect also covers the beta-binomial and the never/sometimes-drop mix for c = 1 and 2 at every ICC in the table (rows where it falls short: {{ref.allowed_short_n}}). For c above 0 that mix is not proven to be the worst case.
+
+**Registered extension that keeps the first look at {{in.n0}}** (also before trial 1 only). The overall false-pass chance is {{stat.ext_size|.7f}} for independent trials, and at most {{stat.ext_clustered_max|.4f}} with the subject counts below under either clustered model (m = {{in.m}}). It is costly because the first look already spends {{stat.q59|.4f}}:
+
+{{table:ext}}
+
+**Default: zero drops, no extension.** A registered extension also means more exposure after a known drop, so it needs explicit IRB approval.
+
+**Other stop rules**
+
+| Trigger | Action |
+|---|---|
+| Passive stop touched, pain, injury, or any adverse event | Stop the study. IRB report. Scored DROP if the stop was touched |
+| Torque trip, ramp or STO outside the cell, lost sensor or clock | Stop the session, fix and re-prove on the dummy. Trial INVALID; drop rule still applies |
+| Subject asks to stop | Stop that subject. Keep and report their valid trials. Recruit a replacement to reach the planned size |
+| Dummy check at start or end of a day outside tolerance | Stop. That day's trials go to FC before they count |
+| All planned trials done with no drop | Stop. PASS. No further trials |
+
+## 6. Feasibility before testing (SYNTHETIC)
+
+**In plain words: if the true drop probability is {{in.fc_lo|pct}}–{{in.fc_hi|pct}}, the chance of passing is effectively zero.** At most {{syn.feas.max_pass|.1e}}, about one in {{syn.feas.one_in|,.0f}} (SYNTHETIC), over every m, ICC and allowed-drop option in the tables, and the registered extension.
+
+Independent trials:
+
+{{table:feas}}
+
+With subjects inflated for the ICC (m = {{in.m}}). "Best case" is the mix of subjects most favourable to passing:
+
+{{table:feas_icc}}
+
+- **More subjects do not help.** No row gives any real chance of passing. Under-sizing raises the chance only by breaking the plan: sized for ICC 0 with a true ICC of {{in.icc|g}}, a design that drops {{in.fc_lo|pct}} of the time would pass with chance {{syn.feas.undersized|pct}} (SYNTHETIC).
+- **The first drop is expected almost at once:** on average at trial {{syn.feas.first_drop.FC high|.1f}} to {{syn.feas.first_drop.FC low|.1f}} (SYNTHETIC, independent). At ICC {{in.icc|g}}, the chance of a drop within the first two subjects is {{syn.feas.drop_in_2_subj.FC low|pct}} to {{syn.feas.drop_in_2_subj.FC high|pct}}.
+- **FC's {{in.fc_lo|pct}}–{{in.fc_hi|pct}} is for the nominal hold, not this window.** We reproduce it: {{syn.fc_p_lo|pct}}–{{syn.fc_p_hi|pct}} at mean {{syn.fc_mean|.1f}} ms, SD {{syn.fc_sd|.0f}} ms (SYNTHETIC; a linear extrapolation of [PRU09] outside its data). With the **relaxed** window Charlie chose and the same catch times it is {{syn.p_hi_same_mean|pct}} at the (iv) edge and {{syn.p_lo_same_mean|pct}} at the (b) edge (SYNTHETIC). Extending the trend to zero hold (mean {{syn.mean_h0|.1f}} ms) gives {{syn.p_hi_h0_mean|pct}} and {{syn.p_lo_h0_mean|pct}} (SYNTHETIC). So FC's range is the optimistic case here.
+- **No [PRU09] condition passes either.** Reading ± as SD and times as normal (ASSUMPTIONS), the best is {{syn.pru_best_p|pct}} drops and a {{syn.pru_best_pass|pct}} chance of passing (SYNTHETIC):
+
+{{table:pru}}
+
+- **What would pass.** Chance of passing by true drop probability (exact, independent trials):
+
+{{table:oc}}
+
+  A passing chance of four in five needs a true drop probability of {{stat.p80|pct}} or less; an even chance needs {{stat.p50|pct}}. **A design exactly at the {{in.p0|pct}} target would almost always fail.** With an SD of {{in.pru_sd|.0f}} ms (SYNTHETIC use of [PRU09]), a true {{in.p0|pct}} at the (b) edge needs a mean catch of {{syn.mean_for_p0|.1f}} ms, and a four-in-five chance needs {{syn.mean_for_80|.1f}} ms (SYNTHETIC). At FC's mean catch the {{in.drop|.0f}}° crossing would have to move to {{syn.cross_for_p0|.1f}} ms and {{syn.cross_for_80|.1f}} ms (SYNTHETIC).
+
+**What it implies**
+1. The test is a valid way to *reject* the design, and would do so quickly. It is not a realistic way to *accept* the current one.
+2. Running it on people as planned exposes subjects to drops for a result already expected. **Recommendation: do Phase A only, and do not start Phase B on the current design.** Charlie decides.
+3. FC's estimate is an extrapolation and could be wrong. A small IRB-approved pilot that measures catch time (not pass/fail) would test that at lower cost than Phase B. It is not part of this plan.
+4. This plan proposes no design fix. Any fix must first be checked against the failures log.
+
+## 7. Data logged per trial
+
+| Group | Channels |
+|---|---|
+| Identity | coded subject, session, trial number, fault or sham, random wait, test cell, operator, firmware commit, plan version |
+| Commands | ramp rate, STO time, fault-onset trigger, latch-release time |
+| Torque | commanded and measured joint torque (device side), arm-side torque at the cuff, k used, torque-trip state |
+| Hold | latch load before release (arm side), payload mass, subject arm mass estimate |
+| Motion | elbow angle and speed, peak drop, drop at {{in.catch|.0f}} ms, catch time t_c, passive-stop contact |
+| EMG / IMU | biceps and triceps EMG and IMU at the repo defaults ({{in.emg_hz}} / {{in.imu_hz}} Hz, unchanged), pre-onset EMG onset flag |
+| Timing | clock-sync error, sample-drop count, U_t in force |
+| Outcome | DROP / NO DROP / INVALID, reason, who decided and when, blinding flag, adverse event, comfort report |
+
+The {{in.imu_hz}} Hz IMU has one sample every {{in.imu_ms|.1f}} ms and cannot score a {{in.res|g}} ms criterion. The score uses the rig's own angle and torque channels at {{in.daq_khz|.0f}} kHz or faster ({{in.res|g}} ms per sample; Rev U row 14 asks for a tenth of the window, {{syn.res_req|.2f}} ms SYNTHETIC, rounded down). Raw data are kept. Nothing is deleted.
+
+## 8. Assumptions (unsourced unless stated)
+
+| # | ASSUMPTION |
+|---|---|
+| A1 | The {{in.drop|.0f}}° drop limit (B9). No human-safety source |
+| A2 | The {{in.catch|.0f}} ms catch. No human data |
+| A3 | Drop model: instant catch, zero elbow damping, HE's arm and device parameters, k = {{in.k|.4f}} |
+| A4 | Zero hold torque represents a relaxed user, and one window fits every subject (Charlie 1a) |
+| A5 | ICC of drops ({{in.icc|g}} for planning) and that it is the same for all subjects |
+| A6 | {{in.m}} fault trials per subject (Rev U row 14) |
+| A7 | Subjects are independent and represent the users; subject population not set |
+| A8 | Testing only the governing cell is enough; catch time does not depend on the path |
+| A9 | Score combines catch time and angle, with uncertainty added against a pass |
+| A10 | Passive stop at {{in.stop|.0f}}°, model agreement {{in.tol_model|g}} ms, gravity-moment error ±{{in.g_unc|pct}} (HE scoping) |
+| A11 | Latch release and shams give no usable cue; one sham per fault trial |
+| A12 | "Relaxed" means the EMG onset detector at unchanged defaults stays silent |
+| A13 | (SYNTHETIC) FC's {{in.fc_lo|pct}}–{{in.fc_hi|pct}}: linear extrapolation of [PRU09], normal catch times, SD {{in.pru_sd|.0f}} ms, ± read as SD |
+| A14 | [PRU09] transfers to this task (step torque, horizontal plane, practised subjects there; ramp, vertical, unprepared here) |
+
+## 9. Open items
+
+1. Charlie: run Phase B at all, given section 6?
+2. Charlie: {{stat.plan.subjects}} × {{in.m}} or {{in.n0}} × one? ICC value? Which paths need their own sample?
+3. FC / Charlie: confirm the combined score (A9).
+4. HE: allowed ramp and STO overshoot on the rig; latch design; absorber proof; Rev U row 14 still says the window is recomputed per hold torque.
+5. IRB: criteria, consent, adverse events, rest times, sham ratio.
+
+## References
+
+Bibliographic data for the DOI entries were checked on Crossref on 2026-11-23. "Text read" says how much was read.
+
+- [PRU09] Pruszynski JA, Kurtzer I, Lillicrap TP, Scott SH (2009). Temporal evolution of "automatic gain-scaling". J Neurophysiol 102(2):992–1003. doi:10.1152/jn.00085.2009, PMC2724331. Text read: Methods (1–4 s hold, about five familiarisation repeats) and Results, "Behavior and kinematics" (times). The ± on the times is not labelled there.
+- [CP34] Clopper CJ, Pearson ES (1934). Biometrika 26(4):404–413. doi:10.1093/biomet/26.4.404. Metadata only.
+- [HL83] Hanley JA, Lippman-Hand A (1983). If nothing goes wrong, is everything all right? JAMA 249(13):1743. doi:10.1001/jama.1983.03330370053031. Metadata only.
+- [DBB81] Donner A, Birkett N, Buck C (1981). Randomization by cluster: sample size requirements and analysis. Am J Epidemiol 114(6):906–914. doi:10.1093/oxfordjournals.aje.a113261. Metadata only.
+- [RS92] Rao JNK, Scott AJ (1992). A simple method for the analysis of clustered binary data. Biometrics 48(2):577. doi:10.2307/2532311. Abstract read (design effect and effective sample size).
+- [KMP04] Killip S, Mahfoud Z, Pearce K (2004). What is an intracluster correlation coefficient? Ann Fam Med 2(3):204–208. doi:10.1370/afm.141, PMC1466680. Read through a fetch agent: worked example m = 32, ICC 0.017, DE 1.527, 128 subjects, effective size 84. The formula itself is an image there, so we checked it by that example. One sentence, as fetched, gives DE 1 at ICC 1; that conflicts with its own statement that the effective size falls to the number of clusters, which needs DE = m as used here.
+- [W75] Williams DA (1975). The analysis of binary responses from toxicological experiments involving reproduction and teratogenicity. Biometrics 31(4):949. doi:10.2307/2529820. Abstract read (beta-distributed response probability within clusters).
+- [WMA24] World Medical Association. Declaration of Helsinki, October 2024 revision, paragraph 23. https://www.wma.net/policies-post/wma-declaration-of-helsinki/ (read through a fetch agent 2026-11-23). doi:10.1001/jama.2024.21972.
+- [CFR46] 45 CFR 46.109(a), https://www.law.cornell.edu/cfr/text/45/46.109 (read in part through a fetch agent; eCFR and HHS refused the fetch).
+- Project files (not in this repo): `exo/calc_BA15_testplan.py` and `exo/BA15_testplan_out.json` (HE scoping; rerun byte-identical), `exo/SN5_BenchC_rules_RevU.md` (row 14, B-A15), `fc_check/sessions_r1/S7_verdict.md` (FC, rows 1, 12, 14, 16), `exo/benchC_rules_out.json` (k, T0).
