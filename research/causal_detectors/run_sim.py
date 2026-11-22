@@ -367,7 +367,10 @@ def tables(rep, path):
     r = lambda q: f"{q['per_min']:.3g} [{q['ci95'][0]:.2g}, {q['ci95'][1]:.2g}] ({q['alarms']} in {q['minutes']:.0f} min)"  # noqa: E731,E501
     L = ["# Tables. ALL DATA SYNTHETIC. Latency in ms after the true onset: mean (SD).", "",
          f"`run_sim.py report`; {rep['batches']} batches = {rep['rest_hours_white']:.0f} h of white rest.",
-         "",
+         "", "`detect_lead_ms` is an ungated diagnostic and not device latency. The commit is 100.0 ms",
+         "after the trigger (the refine wait, for back-dated onset accuracy); no controller path waits for",
+         "it. Only the difference against the trigger bears on latency, in triggered mode, not the default.",
+         "All detectors, thresholds and rankings are for white noise.", "",
          "## Production false alarms per minute of rest [95% CI]", "", 
          "| rest | trigger (hold met) | commit (reported onset) |",
          "|---|---|---|"]
@@ -405,8 +408,9 @@ def tables(rep, path):
                                 f"{d['mean']:+.1f} ± {d['se_cluster']:.1f}")
                 L.append(f"| {n} | " + " | ".join(cols) + " |")
         cs = sorted((c for c in cells if c.startswith("repo40_")), key=lambda c: float(c.split("snr")[1]))
-        L += ["", "repo40 live detect_lead_ms (IMU detected_s - alarm) mean (SD); IMU trigger_s - alarm; "
-              "95th percentile latency; paired difference vs production commit (= gain in detect_lead)", "",
+        L += ["", "repo40 detect_lead_ms (ungated diagnostic; IMU detected_s - alarm) mean (SD); "
+              "IMU trigger_s - alarm; "
+              "95th percentile latency; paired difference vs production commit (= change in detect_lead)", "",
               "| detector | " + " | ".join(cs) + " |", "|---|" + "---|" * len(cs)]
         for n, q in cand.items():
             cols = []
@@ -419,11 +423,16 @@ def tables(rep, path):
 
 
 def digest(rep, path):
-    """One short table per target: repo40 latency, gain over the production commit, false alarms."""
+    """One short table per target: repo40 latency, change against the production commit, false alarms."""
     cs = [f"repo40_snr{x:g}" for x in SNRS]
     L = ["# Digest. ALL DATA SYNTHETIC (repo generator, 40 ms smoothstep; 960 trials per SNR).", "",
          "Latency = alarm - true onset, ms, mean (SD), at SNR 3 / 5 / 15. Gain = production commit - alarm,",
-         "ms, paired mean = the gain in live detect_lead_ms. FA = false alarms per rest-minute, odd batches.",
+         "ms, paired mean = the change in detect_lead_ms, an UNGATED DIAGNOSTIC and not device latency:",
+         "100.0 ms of it is the 0.1 s refine wait, which no controller path waits for (README: a triggered",
+         "controller fires at the hold). Subtract 100.0 for the saving against the hold (triggered mode",
+         "only, not the default). WHITE NOISE only: thresholds and rankings do not carry over to shaped",
+         "noise without recalibration.",
+         "FA = false alarms per rest-minute, odd batches.",
          "Artefact: see cmd_artefact; share of 480 rest trials with a 5 ms transient that raise an alarm."]
     L += ["", "Production COMMITTED onsets on the same artefact trials (its trigger is env8_h30 at h = 6): "
           + "; ".join(f"{k}: {v}/{N_ART}" for k, v in rep["prod_artefact"].items())]

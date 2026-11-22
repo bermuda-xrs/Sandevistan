@@ -1,7 +1,12 @@
 # Digest. ALL DATA SYNTHETIC (repo generator, 40 ms smoothstep; 960 trials per SNR).
 
 Latency = alarm - true onset, ms, mean (SD), at SNR 3 / 5 / 15. Gain = production commit - alarm,
-ms, paired mean = the gain in live detect_lead_ms. FA = false alarms per rest-minute, odd batches.
+ms, paired mean = the change in detect_lead_ms, an UNGATED DIAGNOSTIC and not device latency:
+100.0 ms of it is the 0.1 s refine wait, which no controller path waits for (README: a triggered
+controller fires at the hold). Subtract 100.0 for the saving against the hold (triggered mode
+only, not the default). WHITE NOISE only: thresholds and rankings do not carry over to shaped
+noise without recalibration.
+FA = false alarms per rest-minute, odd batches.
 Artefact: see cmd_artefact; share of 480 rest trials with a 5 ms transient that raise an alarm.
 
 Production COMMITTED onsets on the same artefact trials (its trigger is env8_h30 at h = 6): artefact x5: 31/480; artefact x10: 303/480; artefact x30: 479/480

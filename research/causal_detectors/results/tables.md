@@ -2,6 +2,11 @@
 
 `run_sim.py report`; 720 batches = 600 h of white rest.
 
+`detect_lead_ms` is an ungated diagnostic and not device latency. The commit is 100.0 ms
+after the trigger (the refine wait, for back-dated onset accuracy); no controller path waits for
+it. Only the difference against the trigger bears on latency, in triggered mode, not the default.
+All detectors, thresholds and rankings are for white noise.
+
 ## Production false alarms per minute of rest [95% CI]
 
 | rest | trigger (hold met) | commit (reported onset) |
@@ -98,7 +103,7 @@
 | glr_w100 | 66.6 (12.2) [300/300, 0]; -36.8 ± 0.6 | 43.6 (8.4) [300/300, 0]; -38.3 ± 0.3 | 20.0 (4.1) [300/300, 0]; -39.4 ± 0.2 |
 | bocpd | 68.1 (13.3) [300/300, 0]; -35.4 ± 0.7 | 43.9 (8.7) [300/300, 0]; -38.0 ± 0.4 | 20.4 (4.1) [300/300, 0]; -39.0 ± 0.2 |
 
-repo40 live detect_lead_ms (IMU detected_s - alarm) mean (SD); IMU trigger_s - alarm; 95th percentile latency; paired difference vs production commit (= gain in detect_lead)
+repo40 detect_lead_ms (ungated diagnostic; IMU detected_s - alarm) mean (SD); IMU trigger_s - alarm; 95th percentile latency; paired difference vs production commit (= change in detect_lead)
 
 | detector | repo40_snr3 | repo40_snr5 | repo40_snr15 |
 |---|---|---|---|
@@ -188,7 +193,7 @@ repo40 live detect_lead_ms (IMU detected_s - alarm) mean (SD); IMU trigger_s - a
 | glr_w100 | 69.4 (12.1) [300/300, 0]; -34.0 ± 0.6 | 45.4 (8.3) [300/300, 0]; -36.6 ± 0.3 | 20.7 (4.2) [300/300, 0]; -38.7 ± 0.2 |
 | bocpd | 71.3 (13.7) [300/300, 0]; -32.1 ± 0.7 | 45.3 (8.8) [300/300, 0]; -36.6 ± 0.4 | 21.0 (4.3) [300/300, 0]; -38.4 ± 0.2 |
 
-repo40 live detect_lead_ms (IMU detected_s - alarm) mean (SD); IMU trigger_s - alarm; 95th percentile latency; paired difference vs production commit (= gain in detect_lead)
+repo40 detect_lead_ms (ungated diagnostic; IMU detected_s - alarm) mean (SD); IMU trigger_s - alarm; 95th percentile latency; paired difference vs production commit (= change in detect_lead)
 
 | detector | repo40_snr3 | repo40_snr5 | repo40_snr15 |
 |---|---|---|---|
@@ -278,7 +283,7 @@ repo40 live detect_lead_ms (IMU detected_s - alarm) mean (SD); IMU trigger_s - a
 | glr_w100 | 74.0 (12.4) [300/300, 0]; -29.4 ± 0.6 | 48.0 (8.3) [300/300, 0]; -33.9 ± 0.3 | 22.1 (4.3) [300/300, 0]; -37.4 ± 0.2 |
 | bocpd | 77.4 (15.0) [300/300, 0]; -26.0 ± 0.8 | 48.5 (8.9) [300/300, 0]; -33.4 ± 0.4 | 22.4 (4.3) [300/300, 0]; -37.0 ± 0.2 |
 
-repo40 live detect_lead_ms (IMU detected_s - alarm) mean (SD); IMU trigger_s - alarm; 95th percentile latency; paired difference vs production commit (= gain in detect_lead)
+repo40 detect_lead_ms (ungated diagnostic; IMU detected_s - alarm) mean (SD); IMU trigger_s - alarm; 95th percentile latency; paired difference vs production commit (= change in detect_lead)
 
 | detector | repo40_snr3 | repo40_snr5 | repo40_snr15 |
 |---|---|---|---|
@@ -368,7 +373,7 @@ repo40 live detect_lead_ms (IMU detected_s - alarm) mean (SD); IMU trigger_s - a
 | glr_w100 | 71.8 (12.3) [300/300, 0]; -31.6 ± 0.6 | 46.8 (8.3) [300/300, 0]; -35.1 ± 0.3 | 21.4 (4.2) [300/300, 0]; -38.0 ± 0.2 |
 | bocpd | 68.2 (13.3) [300/300, 0]; -35.2 ± 0.7 | 44.0 (8.7) [300/300, 0]; -38.0 ± 0.4 | 20.4 (4.1) [300/300, 0]; -39.0 ± 0.2 |
 
-repo40 live detect_lead_ms (IMU detected_s - alarm) mean (SD); IMU trigger_s - alarm; 95th percentile latency; paired difference vs production commit (= gain in detect_lead)
+repo40 detect_lead_ms (ungated diagnostic; IMU detected_s - alarm) mean (SD); IMU trigger_s - alarm; 95th percentile latency; paired difference vs production commit (= change in detect_lead)
 
 | detector | repo40_snr3 | repo40_snr5 | repo40_snr15 |
 |---|---|---|---|
@@ -458,7 +463,7 @@ repo40 live detect_lead_ms (IMU detected_s - alarm) mean (SD); IMU trigger_s - a
 | glr_w100 | 84.4 (12.6) [300/300, 0]; -19.0 ± 0.7 | 54.5 (8.2) [300/300, 0]; -27.5 ± 0.4 | 25.1 (4.4) [300/300, 0]; -34.3 ± 0.2 |
 | bocpd | 78.2 (14.9) [300/300, 0]; -25.3 ± 0.8 | 48.9 (9.0) [300/300, 0]; -33.1 ± 0.4 | 22.5 (4.3) [300/300, 0]; -36.9 ± 0.2 |
 
-repo40 live detect_lead_ms (IMU detected_s - alarm) mean (SD); IMU trigger_s - alarm; 95th percentile latency; paired difference vs production commit (= gain in detect_lead)
+repo40 detect_lead_ms (ungated diagnostic; IMU detected_s - alarm) mean (SD); IMU trigger_s - alarm; 95th percentile latency; paired difference vs production commit (= change in detect_lead)
 
 | detector | repo40_snr3 | repo40_snr5 | repo40_snr15 |
 |---|---|---|---|
