@@ -1,0 +1,42 @@
+{
+ "single trial, noise carrier|0.02": {
+  "mean": 60.41,
+  "sd": 5.849753808462334,
+  "frac_gt": 0.079
+ },
+ "mean of 10, noise carrier|0.02": {
+  "mean": 61.6625,
+  "sd": 1.9309511444680116,
+  "frac_gt": 0.001
+ },
+ "mean of 20, noise carrier|0.02": {
+  "mean": 61.7305,
+  "sd": 1.3595838400842437,
+  "frac_gt": 0.0
+ },
+ "single trial, 150 Hz sine carrier|0.02": {
+  "mean": 60.2035,
+  "sd": 1.3409458922290225,
+  "frac_gt": 0.0
+ },
+ "single trial, noise carrier|0.05": {
+  "mean": 56.1155,
+  "sd": 6.356871838378496,
+  "frac_gt": 0.022
+ },
+ "mean of 10, noise carrier|0.05": {
+  "mean": 60.693,
+  "sd": 2.0858095794203284,
+  "frac_gt": 0.0
+ },
+ "mean of 20, noise carrier|0.05": {
+  "mean": 61.1545,
+  "sd": 1.631576474392725,
+  "frac_gt": 0.0
+ },
+ "single trial, 150 Hz sine carrier|0.05": {
+  "mean": 55.7505,
+  "sd": 2.8663942446854693,
+  "frac_gt": 0.0
+ }
+}
