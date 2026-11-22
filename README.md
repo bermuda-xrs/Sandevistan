@@ -53,8 +53,12 @@ on the slow, low-SNR cells (synthetic):
 - A uniform prior on R. A log-spaced grid weights short rises and read about +2.5 ms late at
   80-150 ms rise, SNR 3.
 
-The `refine_s` wait gives the fit more of the rise. At 150 ms / SNR 3 the per-trial SD is 24 ms
-without the wait and 14 ms with it (synthetic, 200 trials). A wait beyond 0.1 s did not help further.
+The `refine_s` wait gives the fit more of the rise. It cuts the spread, not the bias: at 150 ms / SNR 3
+`RampOnset`'s per-trial SD is about 19-20 ms without it (19.2 and 20.0 ms; `refine_s` = 0.5 ms, one sample
+after the hold) and about 14-15 ms with the 0.1 s wait (13.8 and 15.0 ms), with a mean error within 1.6 ms
+either way (synthetic, 200 trials on each of 2 seeds; `scripts/refine_wait_sd.py`). `refine_s` = 0 is not
+"`RampOnset` without the wait": the detector then falls back to the line fit at the hold, which reads
+about 36 ms late there. Waiting 0.15 or 0.2 s did not help further (SD 14.9-16.1 ms, same script).
 
 At the commit sample the trigger is checked:
 - The envelope is still above threshold: a burst is on, and the fit runs to the commit.

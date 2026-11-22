@@ -151,11 +151,24 @@ Cells with Holm p < 0.05: 12.
 | exp 80 SNR 5 | -2.69 ± 5.02 | 39.9 | asymptotic, tau 22.2 | 4.91 | -1.03 / 3.88 / -11.4..+7.1 |
 
 ## Why it fails
-- The model is a straight ramp. On an exponential burst the fit starts early (mean start error −1.5 to −3.4 ms) and its 10% crossing is 0.8–1.5 ms early, so the lead reads 0.7–1.4 ms high. At 10 ms smoothstep the crossing is 0.5–0.7 ms early.
+- The model is a straight ramp. In this implementation, on an exponential burst the fit starts early (mean start error −1.5 to −3.4 ms) and its 10% crossing is 0.8–1.5 ms early, so the lead reads 0.7–1.4 ms high. At 10 ms smoothstep the crossing is 0.5–0.7 ms early.
 - A bias that small is enough. The spread across studies is only 0.27–0.46 ms, and the analytic one-sided t false pass is 0.072 / 0.086 / 0.147 at a bias of +0.42 / +0.65 / +1.39 ms. The simulated values are 0.069 / 0.079 / 0.145 (`out/audit.txt`).
 - The gate itself is not the cause. With perfect EMG onsets on the same studies, false pass is 0.044 (no error) or 0.042 (simulated IMU error).
 - Smoothstep at 20–80 ms survives: bias −0.74 to +0.11 ms, false pass 0.026–0.051. "Unbiased" holds only for that shape and range.
-- On a linear ramp, where the model is right, the 10% crossing is +0.1 to +1.0 ms late (`prechecks.txt`). The early reading comes from the burst shape.
+- **Cause of the early reading.** The filter/delay step of this pipeline (band-pass, whitener and energy-delay subtraction) moves the reading earlier in every cell checked. The shape of the burst is shown to be a cause only at exponential 80 ms. The linear-ramp control in `prechecks.txt` (+0.1 to +1.0 ms late) fed white noise straight into `MlRamp` and skipped that step, so it can't separate the two. Fact Checker (FC) ran the full pipeline and the unfiltered fit on the same bursts (`/workspace/fc_check/sessions_r1/check_S3_diag.py` -> `check_S3_diag_out.txt`; 400 trials per cell, SYNTHETIC; 10% crossing error, mean ± SE, SNR 3 / SNR 5):
+
+  | Burst | Full pipeline (ms) | Unfiltered `MlRamp` (ms) |
+  |---|---|---|
+  | linear 10 ms | -0.26 ± 0.18 / -0.23 ± 0.09 | +0.29 ± 0.16 / +0.37 ± 0.08 |
+  | smoothstep 10 ms | -0.34 ± 0.16 / -0.60 ± 0.09 | +0.28 ± 0.14 / +0.08 ± 0.09 |
+  | exponential 10 ms | -1.51 ± 0.19 / -1.07 ± 0.08 | -0.50 ± 0.14 / -0.44 ± 0.07 |
+  | exponential 40 ms | -1.39 ± 0.24 / -0.65 ± 0.13 | -0.67 ± 0.21 / -0.07 ± 0.11 |
+  | exponential 80 ms | -2.07 ± 0.30 / -1.13 ± 0.16 | -1.31 ± 0.26 / -0.51 ± 0.15 |
+
+  - The pipeline reads earlier than the unfiltered fit in all 18 cells FC ran, by 0.09 to 1.01 ms (median 0.605; `/workspace/claude_sessions/8_seedfix-prs/scripts/s3_pipeline_shift.py` -> `out/s3_pipeline_shift.txt`).
+  - **The two smoothstep 10 ms kills come from the filter/delay step**: without it the same bursts read late, in the author's `MlRamp` and in FC's own fit. The diagnostic does not separate the three parts of the step. Its unfiltered arm also used a fixed window, where the full-pipeline arm used the trigger window.
+  - **Only exponential 80 ms is shown to be shape-driven**: it stays early without the pipeline in both `MlRamp` and FC's own fit (-1.23 ± 0.24 / -0.62 ± 0.12 ms). Exponential 10 and 40 ms are mixed: unfiltered `MlRamp` still reads early at 10 ms and at 40 ms SNR 3, but FC's own fit reads -0.16 ± 0.12 / -0.02 ± 0.06 ms at 10 ms and was not run at 40 ms for SNR 3 and 5. Exponential 20 and 30 ms are in the kill grid but were not in the diagnostic, so their cause is not established.
+- **Scope of the KILL:** this implementation (AR(10) whitener, band-pass, delay subtraction, arg-max linear-ramp fit, P = 0.10) on this seed set (root 20261122, studies 0-999) and this grid. It is not a verdict on ML ramp-onset methods. The KILL is robust on this seed set (study bootstrap 11-13 cells over the limit, median 12, at least one every time); the count is not (13 with FC's control variate; smoothstep 10 ms SNR 5 would trip in a replicate with probability about 0.79; FC, `check_S3_out.txt` section 5).
 - Power in the killed cells (0.875–0.944) is inflated by the same bias and must not be quoted as a gain.
 
 ## Onset-definition sensitivity (post hoc, not the kill test)
@@ -175,8 +188,8 @@ Cells over the kill line by P (`out/audit.txt`): 10/20 at P = 0, 11/20 at 0.05, 
 
 ## Sources
 - Staude GH. "Precise onset detection of human motor responses using a whitening filter and the log-likelihood-ratio test." *IEEE Trans Biomed Eng* 2001;48(11):1292–1305. https://doi.org/10.1109/10.959325 (PMID 11686628). **Abstract read; full text not read.** The abstract is about kinematic signals (e.g. joint angle), not EMG. It supports the whitening + likelihood idea only.
-- Staude G, Flachenecker C, Daumer M, Wolf W. "Onset Detection in Surface Electromyographic Signals: A Systematic Comparison of Methods." *EURASIP J Adv Signal Process* 2001. https://doi.org/10.1155/S1110865701000191. **Abstract read on the Springer page; full text not obtained (sign-in page).** It reports that detection depends on onset rise time, SNR and background activity, and uses a maximum-likelihood estimator as its reference.
-- **Not found:** I could not verify in either paper a page or equation for a ramp amplitude profile. The ramp model is this repo's (`RampOnset`) with the whitening and arg-max changes above. Do not cite it as Staude's published equation, and do not read this kill as a verdict on Staude's own methods.
+- Staude G, Flachenecker C, Daumer M, Wolf W. "Onset Detection in Surface Electromyographic Signals: A Systematic Comparison of Methods." *EURASIP Journal on Advances in Signal Processing* 2001, volume 2001, issue 2, article 867853. https://doi.org/10.1155/S1110865701000191. (Volume, issue and article number checked in Crossref and on the Springer page: `/workspace/claude_sessions/8_seedfix-prs/src_cache/`.) **Abstract read on the Springer page; full text not obtained.** It reports that detection depends on onset rise time, SNR and background activity, and uses a maximum-likelihood estimator as its reference.
+- **Not found:** I could not verify in either paper a page or equation for a ramp amplitude profile. The ramp model is this repo's (`RampOnset`) with the whitening and arg-max changes above. Do not cite it as Staude's published equation, and do not read this kill as a verdict on Staude's own methods or on other ML ramp-fit implementations.
 
 ## Limits
 Synthetic only: white noise, sustained bursts, minimum-jerk angle. No real EMG, no linear-ramp or other shapes at the gate, SNR 3 and 5 only, one AR order. The test covers the offline back-dated lead and says nothing about live detection delay. The incumbent `RampOnset` was not re-run under the P = 0.10 definition, so there is no paired comparison.
