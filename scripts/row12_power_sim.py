@@ -2,10 +2,11 @@
 
 No recorded EMG or motion is read. This replaces the scratch ``ps_study.py`` / ``fc4_study.py``
 generator. Those seeded the subject offset with ``default_rng([seed, i])`` and the session with
-``default_rng([seed, i, j])``. numpy's SeedSequence pads a seed list shorter than its 4-word pool with
-zeros (``mix_entropy`` in numpy/random/bit_generator.pyx), so session 0 drew from the subject's stream
-and its offset was exactly 0.75 x the subject offset. That made the SD of a subject mean 10.57 ms
-instead of the 8.91 ms design value.
+``default_rng([seed, i, j])``. numpy's SeedSequence converts a seed list to 32-bit words and pads it with
+zeros if that gives fewer words than its pool (4 by default; ``mix_entropy`` in
+numpy/random/bit_generator.pyx). The count is of words, not list items: an entry >= 2**32 is 2 words.
+So session 0 drew from the subject's stream and its offset was exactly 0.75 x the subject offset. That
+made the SD of a subject mean 10.55 ms (theory) instead of the 8.91 ms design value.
 
 Seeding here is a SeedSequence tree, study -> subject -> session -> trial, built from spawn keys
 (``node``). Spawn keys are mixed in after the pool and are not padded, so no two nodes share a

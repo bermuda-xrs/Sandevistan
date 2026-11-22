@@ -55,7 +55,7 @@ class SyntheticSource:
         # SeedSequence spawn tree: seed -> subject -> session -> trial. Child 0 of a subject or a
         # session is that node's own offset stream, children 1.. are its sessions or trials. Spawn
         # keys are mixed in after the entropy pool, so no two nodes share a stream. Seed lists do:
-        # numpy pads a list shorter than the 4-word pool with zeros, so [seed, s] == [seed, s, 0].
+        # numpy pads a list of fewer 32-bit words than the pool's 4 with zeros: [seed, s] == [seed, s, 0].
         for s, subject in enumerate(np.random.SeedSequence(self.seed).spawn(self.n_subjects)):
             subj_seed, *session_nodes = subject.spawn(1 + self.n_sessions)
             subj_off = np.random.default_rng(subj_seed).normal(0, self.subject_sd_ms)
