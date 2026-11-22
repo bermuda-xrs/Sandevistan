@@ -354,7 +354,7 @@ def cmd_report(a):
                                          val=v_set.rate(name, h),
                                          white=val.rate(name, h),
                                          **{t: n.rate(name, h) for t, n in fl.items()}, latency=lat)
-    (res / "report.json").write_text(json.dumps(rep, indent=1))
+    (res / "report.json").write_text(json.dumps(rep))
     tables(rep, res / "tables.md")
     digest(rep, res / "digest.md")
 

@@ -1,0 +1,1 @@
+SYNTHETIC. production first hold sample vs env8_h30 > 6: 500/500 rest segments identical, 0 differ in trigger / no trigger (batches 0:4, white 100 + floor20 25 per batch)
