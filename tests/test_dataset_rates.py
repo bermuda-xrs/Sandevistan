@@ -5,9 +5,10 @@ Lucchetti et al. 2025 records EMG at 1000 Hz and markers at 125 Hz (HS02.mat ``E
 and Rojas-Martinez et al. 2020 records HD-EMG at 2048 Hz. The harness must run at those rates with
 the same lead accuracy, and the defaults must not move.
 
-Measured (SYNTHETIC, 4 seeds x 72 trials per cell, SyntheticSource and MinJerkSource): mean lead
-error -3.8 to -4.2 ms at every rate pair tried (2000/150, 1000/125, 2048/125, 1000/150, 2048/150),
-no misses. That is the known smoothstep-burst bias (``SMOOTHSTEP_LEAD_BIAS_MS``), not a rate effect.
+Measured (SYNTHETIC, 16 seeds x 72 trials, paired against 2000/150 Hz, both sources): mean lead-error
+shift at most 0.14 ms at 1000/125, 2048/125, 2000/125 and 1000/150 Hz, every 95% interval containing 0;
+per-trial SD 3-17% larger; one missed trial of 1152 at every rate. The common offset of about -4 ms is the
+known smoothstep-burst bias (``SMOOTHSTEP_LEAD_BIAS_MS``), not a rate effect.
 """
 
 import json
@@ -67,7 +68,7 @@ def test_lead_accuracy_at_dataset_rates(cls, fs_emg, fs_imu):
     assert missed == 0
     lo, hi = SMOOTHSTEP_LEAD_BIAS_MS
     assert lo < err.mean() < hi  # same known shape bias as at 2000/150 Hz
-    assert err.std(ddof=1) < 6.0  # 2.9-3.7 ms measured; 2000/150 Hz gives 3.0-3.3
+    assert err.std(ddof=1) < 6.0  # 3.4-3.7 ms measured; 2000/150 Hz gives 3.1-3.2
 
 
 @pytest.mark.parametrize("fs", [0.0, -1000.0, float("nan"), float("inf")])

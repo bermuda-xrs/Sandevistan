@@ -202,10 +202,13 @@ and `--fs-imu` override them (written to `summary.json` as `demo.fs_emg_hz` and 
 The public datasets checked so far use other rates: Lucchetti et al. 2025
 (doi:10.1038/s41597-025-06174-3) has EMG at 1000 Hz and markers at 125 Hz (`EmgFreq`/`KinFreq` in
 HS02.mat), and Rojas-Martinez et al. 2020 (doi:10.1038/s41597-020-00717-6) has HD-EMG at 2048 Hz. On
-synthetic data the mean lead error at 1000/125, 2048/125, 1000/150 and 2048/150 Hz is -3.8 to -4.2
-ms, the same known smoothstep bias as at 2000/150 Hz (`tests/test_dataset_rates.py`). The detectors
-take `fs` from each `Trial`. The EMG band's upper edge is capped at 0.45 * fs, so it stays 20-450 Hz
-down to 1000 Hz. A rate too low for the EMG band or the IMU smoothing raises a `ValueError`.
+synthetic data the rates do not move the mean lead error: paired against 2000/150 Hz, the shift at
+1000/125, 2048/125, 2000/125 and 1000/150 Hz is at most 0.14 ms and every 95% interval contains 0
+(16 seeds x 72 trials, `SyntheticSource` and `MinJerkSource`). The per-trial SD is 3-17% larger, and
+the known smoothstep bias (about -4 ms) is unchanged. `tests/test_dataset_rates.py` guards 1000/125
+and 2048/125. The detectors take `fs` from each `Trial`. The EMG band's upper edge is capped at 0.45
+* fs, so it stays 20-450 Hz down to 1000 Hz. A rate too low for the EMG band or the IMU smoothing
+raises a `ValueError`.
 
 ## Output
 `trials.csv`: `subject_id, session_id, trial_id, emg_onset_s, imu_onset_s, lead_ms, margin_ms,
