@@ -52,14 +52,20 @@ class SyntheticSource:
     emg_onset_range_s: tuple[float, float] = (1.5, 2.5)
 
     def __iter__(self) -> Iterator[Trial]:
-        for s in range(self.n_subjects):
-            subj_off = np.random.default_rng([self.seed, s]).normal(0, self.subject_sd_ms)
-            for ss in range(self.n_sessions):
-                rng_s = np.random.default_rng([self.seed, s, ss])
+        # SeedSequence spawn tree: seed -> subject -> session -> trial. Child 0 of a subject or a
+        # session is that node's own offset stream, children 1.. are its sessions or trials. Spawn
+        # keys are mixed in after the entropy pool, so no two nodes share a stream. Seed lists do:
+        # numpy pads a list shorter than the 4-word pool with zeros, so [seed, s] == [seed, s, 0].
+        for s, subject in enumerate(np.random.SeedSequence(self.seed).spawn(self.n_subjects)):
+            subj_seed, *session_nodes = subject.spawn(1 + self.n_sessions)
+            subj_off = np.random.default_rng(subj_seed).normal(0, self.subject_sd_ms)
+            for ss, session in enumerate(session_nodes):
+                sess_seed, *trial_seeds = session.spawn(1 + self.n_trials)
+                rng_s = np.random.default_rng(sess_seed)
                 sess_off = rng_s.normal(0, self.session_sd_ms)
                 gain = rng_s.uniform(0.7, 1.3)  # electrode re-don changes amplitude
-                for t in range(self.n_trials):
-                    rng = np.random.default_rng([self.seed, s, ss, t + 1])
+                for t, trial_seed in enumerate(trial_seeds):
+                    rng = np.random.default_rng(trial_seed)
                     yield self._trial(rng, s, ss, t, subj_off + sess_off, gain)
 
     def _trial(self, rng, s, ss, t, offset_ms, gain) -> Trial:

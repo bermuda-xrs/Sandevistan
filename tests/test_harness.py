@@ -69,9 +69,10 @@ def _errors(seed):
 
 
 # SyntheticSource's EMG burst is a 40 ms smoothstep (S-curve) in amplitude. The EMG onset model
-# (RampOnset) is a linear amplitude ramp, so it reads this burst about 3.88 ms late and the lead
-# about 3.88 ms short (synthetic). The bound is the 6 ms margin; the sign bias is pinned below
-# and kept visible by test_no_sign_bias_on_smoothstep_burst (strict xfail).
+# (RampOnset) is a linear amplitude ramp, so it reads this burst about 4.00 ms late and the lead
+# about 4.00 ms short (synthetic; scripts/synthetic_source_spread.py). The bound is the 6 ms
+# margin; the sign bias is pinned below and kept visible by
+# test_no_sign_bias_on_smoothstep_burst (strict xfail).
 SMOOTHSTEP_LEAD_BIAS_MS = (-6.0, -1.5)
 
 
@@ -86,7 +87,7 @@ def test_recovers_known_lead():
 
 
 @pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
-    "Known gap: the linear-ramp EMG onset model reads a 40 ms smoothstep burst ~3.88 ms late "
+    "Known gap: the linear-ramp EMG onset model reads a 40 ms smoothstep burst ~4.00 ms late "
     "(synthetic), so every seed's lead error is negative. See README 'EMG onset'."))
 def test_no_sign_bias_on_smoothstep_burst():
     errs = [_errors(seed) for seed in range(6)]

@@ -18,6 +18,7 @@ Measures lead = IMU/angle onset - EMG onset per trial; tests pooled one-sided lo
   minimum-jerk and critically damped families on the raw angle (`KinematicOnset`); line fit is the fallback.
   `BaselineRest` rejects a move inside the 1.0 s baseline.
 - `sources.py` `Trial`, `TrialSource`, `SyntheticSource` (critically damped), `MinJerkSource` (Flash & Hogan 1985).
+  Streams are a `SeedSequence` spawn tree (subject > session > trial); spread numbers: `scripts/synthetic_source_spread.py`.
 - `stats.py` `LeadStats` (t bound, cluster bootstrap, summarize) and `SampleSize` (power / required N from
   pilot between- and within-subject variance). 16x3 is `plan_status: unverified` until real variances exist.
 - `harness.py` `TrialResult` (includes confirmation delay and baseline flag), `Harness.run`.
@@ -46,8 +47,8 @@ at 200/80 trials per cell (`tests/test_emg_grid.py`); at FC's 40 trials the 150 
 5-14 ms at SNR 3. Isolated 40-80 ms bursts: >= 96% detected except 40 ms / SNR 3 (71-81% over test seeds 0-9, 243/300 at 300 trials; synthetic);
 `tests/test_emg_short_burst.py`. Its 65% bound for 40 ms / SNR 3 is a loose regression guard: it catches a drop to about
 60% or below, not small changes (measured 107-121/150 over seeds 0-9; synthetic).
-In-family bias (synthetic, `scripts/bias_guard_band.py`, 16x3x10 SyntheticSource, seeds 0-5): -3.93 ms
-(95% CI over seeds [-4.05, -3.81]); option C u = 0.139 ms, w = k*u -> gate 68.81/68.95/69.09 ms (k = 1/2/3).
+In-family bias (synthetic, `scripts/bias_guard_band.py`, 16x3x10 SyntheticSource, seeds 0-5): -3.927 ms
+(95% CI over seeds [-4.000, -3.854]); option C u = 0.135 ms, w = k*u -> gate 68.805/68.940/69.075 ms (k = 1/2/3).
 u covers detector noise on one burst shape only. Rise/shape dependence (about -0.3 to -14.5 ms) dominates
 and is unknown without recorded EMG. Out-of-family motion is unchanged (strict xfails in `tests/test_imu_out_of_family.py`).
 Fact Checker round 2 FAILED 2026-11-11: out-of-family motion 49 ms early to 271 ms late, EMG sign bias ~±11 ms (> 6 ms margin). A single demo seed is not the 8.91 ms design SD.
