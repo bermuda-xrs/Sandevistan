@@ -49,6 +49,22 @@ G_UNC = 0.05  # subject gravity moment known to +-5 % (ASSUMPTION, HE)
 RES_MS = 0.1  # RevU row 14 timing resolution
 TOL_MODEL_MS = 0.5  # dummy agreement with the model (ASSUMPTION, HE)
 EMG_HZ, IMU_HZ = 2000, 150  # repo defaults, quoted only (protected, not changed)
+T_CAP_DEV = 7.898894154818326  # device chain cap, N*m (exo/benchC_rules_out.json chain_nom cap)
+
+# Timing budget and rig (ASSUMPTIONS from HE's scoping, exo/calc_BA15_testplan.py, unless noted).
+BUDGET_FRAC = 0.10  # total timing uncertainty <= 1/10 of the smallest margin (Rev U row-8 rule, reused)
+ALLOC = dict(sample=0.40, trigger=0.10, release=0.20, angle=0.10, enc_lat=0.10, spare=0.10)
+FS_STEP_KHZ = 5  # sampling rate rounded up to this step
+INPUT_SHARE = 0.25  # each of 4 model inputs (net torque, J, G, k) may use this share of TOL_MODEL_MS
+HOLD_FRACS = (0.0, 0.5, 1.0)  # dummy hold torque as a fraction of G - k*T0 (0 = relaxed)
+# Dummy trial SD (ms), wanted precision of the mean (ms), Rev U row 14 floor of drops per cell, reset (min)
+S_DUMMY_MS, E_DUMMY_MS, N_MIN_CELL, T_RESET_MIN = 0.15, 0.1, 10, 1.0
+Z_TWO_SIDED = 0.975  # two-sided 95 % normal quantile level for the dummy precision
+# th_stroke: absorber stroke beyond engagement; th_up: upper runaway stop above 90 deg (deg);
+# r_stopc, r_tip_extra, clr: stop contact radius, payload half-length, guard clearance (m);
+# abs_profile: real absorber peak / ideal torque; trip_frac: rig torque trip / (k*T0)
+RIG = dict(th_stroke=10.0, th_up=15.0, r_stopc=0.20, r_tip_extra=0.05, clr=0.025, abs_profile=1.5,
+           trip_frac=1.10)
 
 # PRU09 (Pruszynski et al. 2009, Results, "Behavior and kinematics"), ms, read as mean and SD.
 PRU = {"reversal, 1 N·m background": (193.0, 16.0), "reversal, 3 N·m background": (170.0, 22.0),
@@ -67,11 +83,12 @@ LP_TOL = 1e-9
 
 
 # ---------------------------------------------------------------- drop model (SYNTHETIC)
-def arm() -> dict:
-    a = ARM
-    parts = [(a["f_fa"] * a["m_body"], a["com_fa"] * a["L_fa"], a["rg_fa"] * a["L_fa"]),
-             (a["f_hand"] * a["m_body"], a["L_fa"] + a["hand_off"], 0.0),
-             (a["m_pay"], a["L_fa"] + a["pay_off"], 0.0)]
+def arm(mass_scale=1.0) -> dict:
+    """Arm plus device inertia and gravity moment. ``mass_scale`` scales the human-side masses only."""
+    a, ms = ARM, mass_scale
+    parts = [(a["f_fa"] * a["m_body"] * ms, a["com_fa"] * a["L_fa"], a["rg_fa"] * a["L_fa"]),
+             (a["f_hand"] * a["m_body"] * ms, a["L_fa"] + a["hand_off"], 0.0),
+             (a["m_pay"] * ms, a["L_fa"] + a["pay_off"], 0.0)]
     J_h = sum(m * (r**2 + rg**2) for m, r, rg in parts)
     Mr_h = sum(m * r for m, r, _ in parts)
     J = J_h + a["m_dev"] * a["r_dev"] ** 2 + a["m_carr"] * a["s_mid"] ** 2 + a["J_rot"] * a["gear"] ** 2
@@ -79,20 +96,22 @@ def arm() -> dict:
     return dict(J=J, G=G, G_human=Mr_h * a["g"], kT0=K_HI * T0_DEV, hold_nom=G - K_HI * T0_DEV)
 
 
-def crossing(path, rate, sto_ms, hold, J=None, G=None, ang=DROP_LIM):
-    """Time (ms) and speed (deg/s) at which the drop from 90 deg reaches ``ang`` deg."""
+def _integrate(path, rate, sto_ms, hold, J=None, G=None, k=None, T0=None, step_loss=False, ang=None,
+               at_ms=None):
+    """Piecewise DOP853 solve at every torque breakpoint.
+    x = [angle from horizontal (negative = drop), speed].
+    ``ang``: return (time ms, speed deg/s) when the drop first reaches ``ang`` deg. ``at_ms``: return
+    (drop deg, speed deg/s) at that time. ``step_loss``: device torque lost at t = 0 (rig fault case)."""
     A = arm()
-    J, G = J or A["J"], G or A["G"]
+    J, G = A["J"] if J is None else J, A["G"] if G is None else G
+    k, T0 = K_HI if k is None else k, T0_DEV if T0 is None else T0
     td, sto = T_DET[path] / 1e3, math.inf if sto_ms is None else sto_ms / 1e3
+    end = 0.4 if at_ms is None else at_ms / 1e3
 
-    def rhs(tq):
-        return lambda t, x: [x[1], (K_HI * tq(t) + hold - G * math.cos(x[0])) / J]
-
-    # x = [drop angle measured up from the start (negative = falling), speed]; gravity lever = cos(drop)
     def tq(t):
-        return T0_DEV if t < td else max(T0_DEV - rate * (t - td), 0.0)
+        return T0 if t < td else max(T0 - rate * (t - td), 0.0)
 
-    edges = sorted({0.0, 0.4} | {e for e in (td, td + T0_DEV / rate, sto) if 0 < e < 0.4})
+    edges = sorted({0.0, end} | {e for e in (td, td + T0 / rate, sto) if 0 < e < end})
     y = [0.0, 0.0]
 
     def hit(t, x):
@@ -100,16 +119,28 @@ def crossing(path, rate, sto_ms, hold, J=None, G=None, ang=DROP_LIM):
 
     hit.terminal = True
     for a, b in zip(edges[:-1], edges[1:]):
-        f = rhs(tq if a < sto else (lambda t: 0.0))
-        s = solve_ivp(f, (a, b), y, method="DOP853", rtol=1e-11, atol=1e-12, events=hit)
-        if s.t_events[0].size:
+        off = step_loss or a >= sto  # STO opens the torque at its edge; the ramp is smooth inside a segment
+
+        def f(t, x, off=off):
+            return [x[1], (k * (0.0 if off else tq(t)) + hold - G * math.cos(x[0])) / J]
+
+        s = solve_ivp(f, (a, b), y, method="DOP853", rtol=1e-11, atol=1e-12, events=hit if ang else None)
+        if ang and s.t_events[0].size:
             return float(s.t_events[0][0]) * 1e3, -math.degrees(s.y_events[0][0][1])
         y = s.y[:, -1]
+    if at_ms is not None:
+        return -math.degrees(y[0]), -math.degrees(y[1])
     raise ValueError("no crossing")
 
 
-def drop_at(t_ms, path, rate, sto_ms, hold):
-    return brentq(lambda d: crossing(path, rate, sto_ms, hold, ang=d)[0] - t_ms, 0.5, 60.0, xtol=1e-10)
+def crossing(path, rate, sto_ms, hold, ang=DROP_LIM, **kw):
+    """Time (ms) and speed (deg/s) at which the drop from 90 deg reaches ``ang`` deg."""
+    return _integrate(path, rate, sto_ms, hold, ang=ang, **kw)
+
+
+def drop_at(t_ms, path, rate, sto_ms, hold, **kw):
+    """Drop (deg) and speed (deg/s) at ``t_ms``."""
+    return _integrate(path, rate, sto_ms, hold, at_ms=t_ms, **kw)
 
 
 def cells(opt):
@@ -125,21 +156,36 @@ def pru_mean(hold):
     return t1 + (t3 - t1) / 2 * (hold - 1)
 
 
-def model() -> dict:
+def build_grid() -> dict:
+    """All 117 dummy-matrix cells: option x path x rate x STO x hold fraction (SYNTHETIC model values)."""
+    A, grid = arm(), {}
+    for opt in RATE:
+        for path, rate, sto in cells(opt):
+            for hf in HOLD_FRACS:
+                hold = hf * A["hold_nom"]
+                t10, w10 = crossing(path, rate, sto, hold)
+                t_stop, w_stop = crossing(path, rate, sto, hold, ang=STOP_DEG)
+                d200, w200 = drop_at(CATCH_MS, path, rate, sto, hold)
+                grid[(opt, path, rate, sto, hf)] = dict(t10=t10, w10=w10, t_stop=t_stop, w_stop=w_stop,
+                                                        drop200=d200, w200=w200)
+    return grid
+
+
+def model(grid) -> dict:
     A = arm()
-    b = {c: crossing(*c, 0.0)[0] for c in cells("b")}
-    iv = {c: crossing(*c, 0.0)[0] for c in cells("iv")}
+    b = {k[1:4]: v["t10"] for k, v in grid.items() if k[0] == "b" and k[4] == 0.0}
+    iv = {k[1:4]: v["t10"] for k, v in grid.items() if k[0] == "iv" and k[4] == 0.0}
     gov, gov_iv = min(b, key=b.get), min(iv, key=iv.get)
     lo, hi = b[gov], iv[gov_iv]
-    w10 = crossing(*gov, 0.0)[1]
-    t_stop, w_stop = crossing(*gov, 0.0, ang=STOP_DEG)
-    out = dict(A, lo=lo, hi=hi, width=hi - lo, gov="|".join(map(str, gov)),
+    g0 = grid[("b",) + gov + (0.0,)]
+    w10, t_stop, w_stop = g0["w10"], g0["t_stop"], g0["w_stop"]
+    out = dict(A, lo=lo, hi=hi, width=hi - lo, gov="|".join(map(str, gov)), gov_key=list(gov),
                gov_iv="|".join(map(str, gov_iv)),
                lo_comm=min(v for (p, _, _), v in b.items() if p == "comm"),
                lo_emg=min(v for (p, _, _), v in b.items() if p == "emg"),
                hi_estop=min(v for (p, _, _), v in iv.items() if p == "estop"),
                n_cells_b=len(b), n_cells_iv=len(iv),
-               margin_ms=lo - CATCH_MS, drop200=drop_at(CATCH_MS, *gov, 0.0), w10=w10,
+               margin_ms=lo - CATCH_MS, drop200=g0["drop200"], w10=w10,
                res_req=(hi - lo) / 10, ang_res=w10 * RES_MS / 1e3, t_stop=t_stop, w_stop=w_stop)
     # limits of one fixed window: other subjects cross at other times (decision 1a stays fixed)
     path, r, s = gov
@@ -170,6 +216,106 @@ def model() -> dict:
     out.update(mean_for_p0=lo - z * sd, mean_for_80=lo - float(norm.isf(p80)) * sd,
                cross_for_p0=mu + z * sd, cross_for_80=mu + float(norm.isf(p80)) * sd)
     return out
+
+
+# ------------------------------------------------------- rig, timing budget, dummy matrix (SYNTHETIC)
+def hardware(grid, mod) -> dict:
+    """Timing budget, rig energies, dummy matrix and calibration limits. Same method as HE's scoping."""
+    A = arm()
+    margin = min(v["t10"] for v in grid.values()) - CATCH_MS
+    w10_min, w200_max = min(v["w10"] for v in grid.values()), max(v["w200"] for v in grid.values())
+    t_stop_min, w_stop_max = min(v["t_stop"] for v in grid.values()), max(v["w_stop"] for v in grid.values())
+    B = BUDGET_FRAC * margin
+    fs_min = 1 / (ALLOC["sample"] * B)  # kHz, because B is in ms
+    fs = math.ceil(fs_min / FS_STEP_KHZ) * FS_STEP_KHZ
+    ang_max = w10_min * ALLOC["angle"] * B / 1e3
+    bits = math.ceil(math.log2(360 / ang_max))
+    enc_res = 360 / 2**bits
+    ang_t = enc_res / w10_min * 1e3
+    bud = dict(margin_ms=margin, budget_ms=B, fs_min_khz=fs_min, fs_khz=fs, period_ms=1 / fs,
+               period_max_ms=ALLOC["sample"] * B, trigger_ms=ALLOC["trigger"] * B,
+               release_ms=ALLOC["release"] * B, enc_lat_ms=ALLOC["enc_lat"] * B, spare_ms=ALLOC["spare"] * B,
+               ang_max_deg=ang_max, counts_min=360 / ang_max, bits=bits, counts=2**bits, enc_res_deg=enc_res,
+               ang_time_ms=ang_t, w10_min=w10_min, w200_max=w200_max)
+    bud["u_t_ms"] = bud["period_ms"] + bud["trigger_ms"] + bud["release_ms"] + bud["enc_lat_ms"] + ang_t
+    bud["headroom_ms"] = B - bud["u_t_ms"]
+    bud["ok"] = bool(bud["u_t_ms"] <= B)
+    bud["ang_unc_deg"] = enc_res + w200_max * (bud["u_t_ms"] - ang_t) / 1e3
+    bud["t10_min_pass_ms"] = CATCH_MS + bud["u_t_ms"]
+    bud["drop200_max_pass_deg"] = DROP_LIM - bud["ang_unc_deg"]
+    bud["worst_drop200_deg"] = max(v["drop200"] for v in grid.values())
+    # dummy matrix
+    z = float(norm.ppf(Z_TWO_SIDED))
+    n_formula = (z * S_DUMMY_MS / E_DUMMY_MS) ** 2
+    n_cell = max(N_MIN_CELL, math.ceil(n_formula))
+    mat = dict(n_cells=len(grid), n_types=len(grid) // len(HOLD_FRACS), n_cell=n_cell, n_formula=n_formula,
+               drops=n_cell * len(grid), hours=n_cell * len(grid) * T_RESET_MIN / 60,
+               holds=[hf * A["hold_nom"] for hf in HOLD_FRACS], n_b=sum(k[0] == "b" for k in grid) // 3,
+               n_iv=sum(k[0] == "iv" for k in grid) // 3)
+    up = grid[("iv", "comm", RATE["iv"]["comm"] * (1 + TOL), STO["comm"][0], 0.0)]
+    mat["upper_edge_t10"] = up["t10"]
+    mat["rows"] = [dict(cell=f"{'(b)' if o == 'b' else '(iv)'} {p} {r:.2f} N·m/s, STO "
+                        f"{'none' if sto is None else f'{sto:.0f} ms'}",
+                        t10=[grid[(o, p, r, sto, hf)]["t10"] for hf in HOLD_FRACS])
+                   for (o, p, r, sto, hf0) in grid if hf0 == 0.0]
+    # rig energies and speeds (Rig fault: torque lost at t = 0, or the device driving at its cap)
+    th_s, th_k, th_u = (math.radians(x) for x in (STOP_DEG, RIG["th_stroke"], RIG["th_up"]))
+    J, Gm, kcap = A["J"], A["G"], K_HI * T_CAP_DEV
+    ff_t10 = crossing("estop", 20.0, None, 0.0, step_loss=True)
+    ff_stop = crossing("estop", 20.0, None, 0.0, step_loss=True, ang=STOP_DEG)
+    rig = dict(kcap=kcap, ff_t10_ms=ff_t10[0], ff_stop_ms=ff_stop[0], ff_stop_w=ff_stop[1],
+               E_ff_stop=Gm * math.sin(th_s), E_ff_total=Gm * math.sin(th_s + th_k),
+               E_cap_total=Gm * math.sin(th_s + th_k) + kcap * (th_s + th_k),
+               E_cap_stop=Gm * math.sin(th_s) + kcap * th_s,
+               E_up=(kcap + A["hold_nom"]) * th_u - Gm * math.sin(th_u))
+    rig["w_ff_energy"] = math.degrees(math.sqrt(2 * rig["E_ff_stop"] / J))
+    rig["w_cap_stop"] = math.degrees(math.sqrt(2 * rig["E_cap_stop"] / J))
+    rig["w_up"] = math.degrees(math.sqrt(2 * rig["E_up"] / J))
+    rig["T_abs_ideal"] = rig["E_cap_total"] / th_k
+    rig["T_abs_peak"] = rig["T_abs_ideal"] * RIG["abs_profile"]
+    rig["F_abs_peak"] = rig["T_abs_peak"] / RIG["r_stopc"]
+    rig["T_up_ideal"] = rig["E_up"] / th_k + kcap + A["hold_nom"]
+    rig["F_up_peak"] = rig["T_up_ideal"] * RIG["abs_profile"] / RIG["r_stopc"]
+    rig["trip_Nm"] = RIG["trip_frac"] * A["kT0"]
+    rig["trip_pct"] = (RIG["trip_frac"] - 1) * 100
+    r_pay = ARM["L_fa"] + ARM["pay_off"]
+    rig["r_tip"] = r_pay + RIG["r_tip_extra"]
+    rig["r_guard"] = rig["r_tip"] + RIG["clr"]
+    rig["ang_bottom"] = 90 - STOP_DEG - RIG["th_stroke"]
+    rig["ang_top"] = 90 + RIG["th_up"] + RIG["th_stroke"]
+    rig["sweep_mm"] = rig["r_tip"] * math.radians(rig["ang_top"] - rig["ang_bottom"]) * 1e3
+    rig["stop_gap_ms"] = t_stop_min - min(v["t10"] for v in grid.values())
+    rig.update(t_stop_min=t_stop_min, w_stop_max=w_stop_max)
+    # flip values at the governing cell (hold 0): the parameter change that takes the drop at the
+    # 200 ms catch to exactly 10 deg, i.e. where the model would pass a unit that really fails
+    path, rate, sto = mod["gov_key"][0], mod["gov_key"][1], mod["gov_key"][2]
+
+    def d200(**kw):
+        return drop_at(CATCH_MS, path, rate, sto, kw.pop("hold", 0.0), **kw)[0] - DROP_LIM
+
+    flip = dict(
+        J=brentq(lambda m: d200(J=A["J"] * m), 0.3, 1.0, xtol=1e-9),
+        mass=brentq(lambda m: d200(J=arm(m)["J"], G=arm(m)["G"]), 1.0, 1.3, xtol=1e-9),
+        T0=brentq(lambda m: d200(T0=T0_DEV * m), 0.9, 1.0, xtol=1e-9),
+        k=brentq(lambda m: d200(k=K_HI * m), 0.9, 1.0, xtol=1e-9),
+        offset=brentq(lambda dh: d200(hold=-dh), 0.0, 2.0, xtol=1e-9), lag_ms=margin)
+    h = 1e-3
+
+    def t10(**kw):
+        return crossing(path, rate, sto, kw.pop("hold", 0.0), **kw)[0]
+
+    sl = dict(Th=(t10(hold=h) - t10(hold=-h)) / (2 * h),
+              G=(t10(G=A["G"] * 1.01) - t10(G=A["G"] * 0.99)) / 2,
+              J=(t10(J=A["J"] * 1.01) - t10(J=A["J"] * 0.99)) / 2,
+              k=(t10(k=K_HI * 1.01) - t10(k=K_HI * 0.99)) / 2)
+    ti = TOL_MODEL_MS * INPUT_SHARE
+    cal = dict(share_ms=ti, net_torque_Nm=ti / abs(sl["Th"]), G_pct=ti / abs(sl["G"]),
+               J_pct=ti / abs(sl["J"]), k_pct=ti / abs(sl["k"]), slope_Th=sl["Th"], slope_G=sl["G"],
+               slope_J=sl["J"], slope_k=sl["k"])
+    cal["G_Nm"] = cal["G_pct"] / 100 * A["G"]
+    flip_pct = {k: (v - 1) * 100 for k, v in flip.items() if k in ("J", "mass", "T0", "k")}
+    return dict(budget=bud, matrix=mat, rig=rig, flip=flip, flip_pct=flip_pct, cal=cal,
+                gov_cell=mod["gov"], t_stop_min=t_stop_min)
 
 
 # ---------------------------------------------------------------- sample size (exact)
@@ -386,16 +532,24 @@ def reference_check(mod, st) -> dict:
 
 
 def compute() -> dict:
-    mod, st = model(), stats()
+    grid = build_grid()
+    mod, st = model(grid), stats()
+    hw = hardware(grid, mod)
     feas = feasibility(mod)
     inp = dict(win_lo=WINDOW_MS[0], win_hi=WINDOW_MS[1], p0=P0, conf=CONF, n0=N0, drop=DROP_LIM,
                catch=CATCH_MS, stop=STOP_DEG, res=RES_MS, rate=RATE["b"]["estop"] * (1 + TOL),
                rate_iv=RATE["iv"]["estop"] * (1 + TOL), sto=STO["estop"][0], sto_comm=STO["comm"][0],
                tol_model=TOL_MODEL_MS, emg_hz=EMG_HZ, imu_hz=IMU_HZ, imu_ms=1e3 / IMU_HZ,
                daq_khz=1 / RES_MS, lp_tol=LP_TOL, m=M_PLAN, icc=float(ICC_PLAN), k=K_HI, T0=T0_DEV, tol=TOL,
-               g_unc=G_UNC, fc_lo=FC_P[0], fc_hi=FC_P[1], pru_sd=mod["fc_sd"])
+               g_unc=G_UNC, fc_lo=FC_P[0], fc_hi=FC_P[1], pru_sd=mod["fc_sd"],
+               rate_nom=RATE["b"]["estop"], sto_nom=STO["estop"][1], budget_pct=BUDGET_FRAC,
+               step_khz=FS_STEP_KHZ,
+               share=INPUT_SHARE, s_dummy=S_DUMMY_MS, e_dummy=E_DUMMY_MS, n_min_cell=N_MIN_CELL,
+               reset_min=T_RESET_MIN, th_stroke=RIG["th_stroke"], th_up=RIG["th_up"], r_stopc=RIG["r_stopc"],
+               clr_mm=RIG["clr"] * 1e3, abs_profile=RIG["abs_profile"], trip_pct=(RIG["trip_frac"] - 1),
+               alloc=dict(ALLOC), hold_fracs=list(HOLD_FRACS), t_cap=T_CAP_DEV)
     return {"NOTE": "keys under 'syn' are SYNTHETIC (model output, not bench or human data)",
-            "in": inp, "stat": st, "syn": dict(mod, feas=feas), "ref": reference_check(mod, st)}
+            "in": inp, "stat": st, "syn": dict(mod, feas=feas, hw=hw), "ref": reference_check(mod, st)}
 
 
 # ---------------------------------------------------------------- rendering
@@ -439,6 +593,61 @@ def tables(R) -> dict:
     t["feas_icc"] += [f"| {r} | {v0['subjects']} ({v0['subjects'] * M_PLAN}) | " + " | ".join(
         f"{f['clustered'][f'{k}|{r}']['bb']:.1e} / {f['clustered'][f'{k}|{r}']['two']:.1e}"
         for k in f["ps"]) + " |" for r in rs for v0 in [f["clustered"][f"FC low|{r}"]]]
+    hw, ni = R["syn"]["hw"], R["in"]
+    b, rg, mt, cl, fl, al = hw["budget"], hw["rig"], hw["matrix"], hw["cal"], hw["flip"], ni["alloc"]
+
+    def tab(head, rows):
+        return [head, "|---" * (head.count("|") - 1) + "|"] + [f"| {' | '.join(r)} |" for r in rows]
+
+    pc = lambda x: f"{100 * x:.0f} %"  # noqa: E731
+    t["budget"] = tab("| SYNTHETIC timing budget item | Requirement | Derivation |", [
+        ("Smallest model margin", f"{b['margin_ms']:.3f} ms",
+         f"governing cell, over all {mt['n_cells']} cells"),
+        ("Budget", f"{b['budget_ms']:.3f} ms", f"{pc(ni['budget_pct'])} of the margin"),
+        ("Sampling", f"at least {b['fs_khz']:.0f} kHz",
+         f"period at most {b['period_max_ms']:.3f} ms ({pc(al['sample'])}) needs at least "
+         f"{b['fs_min_khz']:.1f} kHz; rounded up to {ni['step_khz']} kHz steps"),
+        ("Trigger skew", f"at most {b['trigger_ms']:.3f} ms", pc(al["trigger"])),
+        ("Release skew", f"at most {b['release_ms']:.3f} ms", pc(al["release"])),
+        ("Encoder latency", f"at most {b['enc_lat_ms']:.3f} ms", pc(al["enc_lat"])),
+        ("Angle resolution", f"at most {b['ang_max_deg']:.4f}° ({b['bits']}-bit: {b['counts']:,} counts, "
+         f"{b['enc_res_deg']:.5f}°)", f"{pc(al['angle'])} at the slowest {b['w10_min']:.1f} °/s crossing; "
+         f"{b['ang_time_ms']:.4f} ms"),
+        ("Spare", f"{b['spare_ms']:.3f} ms", pc(al["spare"])),
+        ("**Used, U_t**", f"**at most {b['u_t_ms']:.3f} ms**",
+         f"{b['period_ms']:.4f} + {b['trigger_ms']:.4f} + {b['release_ms']:.4f} + {b['enc_lat_ms']:.4f} + "
+         f"{b['ang_time_ms']:.4f} ms, against {b['budget_ms']:.3f} ms"),
+        ("Headroom", f"{b['headroom_ms']:.3f} ms", f"{b['budget_ms']:.3f} − {b['u_t_ms']:.3f} ms"),
+        ("Angle uncertainty", f"at most {b['ang_unc_deg']:.4f}°",
+         f"encoder step plus {b['w200_max']:.1f} °/s times the timing terms")])
+    t["absorber"] = tab("| SYNTHETIC rig case | Energy | Speed or force |", [
+        (f"No-hold free fall, device torque lost at t = 0 (stop at {rg['ff_stop_ms']:.1f} ms; 10° at "
+         f"{rg['ff_t10_ms']:.1f} ms)", f"{rg['E_ff_stop']:.3f} J at the stop, "
+         f"{rg['E_ff_total']:.3f} J through the stroke", f"{rg['ff_stop_w']:.0f} °/s at the stop"),
+        (f"Device driving the arm down at its cap (HE's runaway case, k × {ni['t_cap']:.3f} N·m = "
+         f"{rg['kcap']:.2f} N·m)", f"{rg['E_cap_stop']:.3f} J at the stop, "
+         f"**{rg['E_cap_total']:.2f} J through the stroke**", f"{rg['w_cap_stop']:.0f} °/s at the stop"),
+        ("Absorber, constant force over the stroke", f"ideal {rg['T_abs_ideal']:.1f} N·m; peak "
+         f"{rg['T_abs_peak']:.1f} N·m (× {ni['abs_profile']:g}, ASSUMPTION)",
+         f"{rg['F_abs_peak']:.0f} N at {ni['r_stopc']:.2f} m"),
+        (f"Upper runaway stop at +{ni['th_up']:.0f}°, device driving up at its cap", f"{rg['E_up']:.3f} J",
+         f"{rg['w_up']:.0f} °/s; ideal {rg['T_up_ideal']:.1f} N·m, {rg['F_up_peak']:.0f} N peak"),
+        (f"Rig torque trip (+{pc(ni['trip_pct'])} over k × T0)", f"{rg['trip_Nm']:.1f} N·m at the arm",
+         "ASSUMPTION")])
+    pf = hw["flip_pct"]
+    t["flip"] = tab("| SYNTHETIC governing cell, hold 0 | Flip value (drop at the catch reaches "
+                    f"{ni['drop']:.0f}°) | Implied calibration ({cl['share_ms']:.3f} ms each) |", [
+        ("Dummy human-side mass", f"{pf['mass']:+.2f} %", ""),
+        ("Inertia J", f"{pf['J']:+.2f} %", f"±{cl['J_pct']:.2f} %"),
+        ("Gravity moment G", "", f"±{cl['G_pct']:.3f} % (±{cl['G_Nm']:.4f} N·m)"),
+        ("Net pre-onset torque, downward offset", f"{fl['offset']:.3f} N·m",
+         f"±{cl['net_torque_Nm']:.4f} N·m"),
+        ("Clamp T0", f"{pf['T0']:+.2f} %", ""),
+        ("Torque ratio k", f"{pf['k']:+.2f} %", f"±{cl['k_pct']:.3f} %"),
+        ("Timing lag", f"more than {fl['lag_ms']:.2f} ms", f"U_t {b['u_t_ms']:.3f} ms")])
+    t["matrix"] = tab("| SYNTHETIC cell: option, path, ramp, STO | Crossing at hold 0 (ms) | "
+                      f"at {mt['holds'][1]:.3f} N·m (ms) | at {mt['holds'][2]:.3f} N·m (ms) |",
+                      [(r["cell"], *(f"{x:.2f}" for x in r["t10"])) for r in mt["rows"]])
     t["pru"] = ["| SYNTHETIC: PRU09 condition (mean ± SD, ms) | P(catch later than the (b) edge) "
                 f"| P(0 drops in {N0}) |", "|---" * 3 + "|"]
     t["pru"] += [f"| {k} ({PRU[k][0]:.0f} ± {PRU[k][1]:.0f}) | {100 * v['p']:.1f} % | {v['P_pass']:.1e} |"

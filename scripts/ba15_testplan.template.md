@@ -14,7 +14,8 @@
 2. **Pass rule (Charlie, 2b):** show P(drop past {{in.drop|.0f}}°) ≤ {{in.p0|pct}} at {{in.conf|pct}} one-sided confidence with zero drops in {{in.n0}} independent trials.
 3. **Subjects:** with {{in.m}} trials each, {{stat.range_he.0}} to {{stat.range_he.2}} subjects for an ICC of 0 to {{in.icc|g}}; {{stat.plan.subjects_any}} for any ICC. Planning default: {{stat.plan.subjects}} subjects × {{in.m}} trials (ICC {{in.icc|g}}, ASSUMPTION).
 4. **Any drop:** stop, investigate, and the test has FAILED. No extension unless it was registered before trial 1.
-5. **Feasibility: this plan will almost certainly fail on the current design.** If the true drop probability is FC's {{in.fc_lo|pct}}–{{in.fc_hi|pct}}, the chance of passing is at most {{syn.feas.max_pass|.1e}} (SYNTHETIC) (about one in {{syn.feas.one_in|,.0f}}) over every ICC, trials-per-subject and allowed-drop option in this plan. Section 6 says what that means.
+5. **Dummy phase first:** {{syn.hw.matrix.n_cells}} cells × {{syn.hw.matrix.n_cell}} drops = {{syn.hw.matrix.drops|,}} drops, about {{syn.hw.matrix.hours|.1f}} h (ASSUMPTION: {{in.reset_min|g}} min per reset), with a proven timing uncertainty of {{syn.hw.budget.u_t_ms|.3f}} ms (SYNTHETIC budget, section 3).
+6. **Feasibility: this plan will almost certainly fail on the current design.** If the true drop probability is FC's {{in.fc_lo|pct}}–{{in.fc_hi|pct}}, the chance of passing is at most {{syn.feas.max_pass|.1e}} (SYNTHETIC) (about one in {{syn.feas.one_in|,.0f}}) over every ICC, trials-per-subject and allowed-drop option in this plan. Section 6 says what that means.
 
 ## 1. What is tested
 
@@ -38,15 +39,40 @@ B-A15 is the project's human catch model: the user arrests the arm at exactly {{
 - **Human testing needs ethics (IRB) approval before any trial**, including pilots and familiarisation. The Declaration of Helsinki, paragraph 23, requires the protocol to be approved by a research ethics committee before the research begins [WMA24]. Where US rules apply, the IRB approves, requires changes to, or disapproves the research [CFR46]. Which law applies here is not known (ASSUMPTION: whichever applies, approval comes first).
 - The IRB must see section 6. Exposing people to repeated arm drops in a test that is expected to fail is a risk with little expected benefit.
 - Inclusion and exclusion criteria, consent text, medical cover and the adverse-event definition are for the IRB protocol. This plan does not set them (open item).
-- Passive stop below the arm at {{in.stop|.0f}}° (ASSUMPTION, HE scoping). In the governing cell an uncaught arm reaches it at {{syn.t_stop|.1f}} ms and {{syn.w_stop|.0f}} °/s (SYNTHETIC). The stop's absorber must be proven on the dummy before any person uses the rig.
+- **Rig safety (HE scoping; ASSUMPTIONS until built and proven on the dummy).** A person may not use the rig until every item is proven:
+  1. **Rig power cut, independent of the device e-stop.** One cut removes power from the rig's latch, hold emulator and drives, and works with the device e-stop bypassed or failed.
+  2. **Interlocked guard** over the {{syn.hw.rig.r_guard|.3f}} m sweep (payload tip {{syn.hw.rig.r_tip|.2f}} m plus {{in.clr_mm|.0f}} mm clearance). The tip sweeps {{syn.hw.rig.sweep_mm|.0f}} mm of arc between {{syn.hw.rig.ang_bottom|.0f}}° and {{syn.hw.rig.ang_top|.0f}}° (SYNTHETIC geometry). Opening the guard cuts rig power.
+  3. **Passive lower stop** at {{in.stop|.0f}}° drop with a {{in.th_stroke|.0f}}° absorber stroke, sized in the table below. A drop of {{in.drop|.0f}}° is {{in.stop|.0f}} − {{in.drop|.0f}} = 5° short of it; in the earliest cell the arm gets there {{syn.hw.rig.stop_gap_ms|.1f}} ms after its {{in.drop|.0f}}° crossing, and no cell reaches it before {{syn.hw.rig.t_stop_min|.1f}} ms (SYNTHETIC).
+  4. **Upper runaway stop** at +{{in.th_up|.0f}}° above the start, for a device that drives upward.
+  5. **Torque trip** at {{syn.hw.rig.trip_Nm|.1f}} N·m at the arm (SYNTHETIC k·T0 basis, ASSUMPTION).
+
+{{table:absorber}}
+
+  The absorber is sized by the larger case. The no-hold free fall sets the lowest case; with the device driving at its cap the stroke must absorb {{syn.hw.rig.E_cap_total|.2f}} J, against {{syn.hw.rig.E_ff_total|.2f}} J for free fall (SYNTHETIC). The stop is hit at {{syn.hw.rig.w_cap_stop|.0f}} °/s in the larger case, not the {{syn.hw.rig.ff_stop_w|.0f}} °/s of free fall (SYNTHETIC).
 
 ## 3. Procedure
 
 **Phase A: dummy arm, no people.**
-1. Build the rig with a dummy forearm, start latch, angle sensor, torque sensor, passive stop and independent torque trip.
-2. Calibrate. Prove timing uncertainty U_t ≤ {{in.res|g}} ms and angle uncertainty ≤ {{syn.ang_res|.4f}}° (SYNTHETIC: {{in.res|g}} ms at the model's {{in.drop|.0f}}° speed).
-3. Run the governing cell. The dummy's measured {{in.drop|.0f}}° crossing must agree with the model within {{in.tol_model|g}} ms (ASSUMPTION, HE scoping). If it does not, the fixed window is wrong: stop and go to Charlie (via Seren).
-4. Prove the passive stop and the torque trip.
+1. **Build the rig** with a dummy forearm and the device fitted, start latch, hold emulator, angle and torque sensors, and every item of section 2. The dummy plus device must reproduce the model's inertia J = {{syn.J|.4f}} kg·m² and gravity moment G = {{syn.G|.3f}} N·m (SYNTHETIC) within the calibration limits below.
+2. **Prove the safety items** of section 2 before any drop with the device on, including the rig power cut with the device e-stop bypassed.
+3. **Prove the timing budget.** Every term below is measured on the rig, not taken from a data sheet:
+
+{{table:budget}}
+
+   The sampling period of {{syn.hw.budget.period_ms|.4f}} ms is also within the {{in.res|g}} ms timing resolution that Rev U row 14 asks for (a tenth of the {{syn.width|.2f}} ms window, rounded down; SYNTHETIC).
+4. **Calibrate** the dummy. The flip values show how little the model can be off before a failing unit would read as passing; the calibration limits come from splitting the {{in.tol_model|g}} ms model agreement (ASSUMPTION) equally over four inputs ({{in.share|pct}} each):
+
+{{table:flip}}
+
+   The limits for G and for net pre-onset torque are one error, counted twice (conservative): {{syn.hw.cal.G_pct|.3f}} % of G is {{syn.hw.cal.G_Nm|.4f}} N·m (SYNTHETIC).
+5. **Firmware test mode.** The governing cell needs ramp {{in.rate|.2f}} N·m/s and STO {{in.sto|.0f}} ms, the edge of the tolerance band, not the product settings ({{in.rate_nom|.2f}} N·m/s, {{in.sto_nom|.0f}} ms). That needs a test mode in the device firmware. **ASSUMPTION and open risk: it must be verified** that such a mode can set these values without changing the fault path, and the ramp and STO actually delivered must be measured and logged on every trial. A mode that changes the fault path makes the whole test invalid.
+6. **Dummy matrix.** Every cell is run {{syn.hw.matrix.n_cell}} times: {{syn.hw.matrix.n_cells}} cells × {{syn.hw.matrix.n_cell}} = {{syn.hw.matrix.drops|,}} drops, about {{syn.hw.matrix.hours|.1f}} h at {{in.reset_min|g}} min per reset (ASSUMPTION). A cell is one of {{syn.hw.matrix.n_b}} (b) cells and {{syn.hw.matrix.n_iv}} (iv) cells (path × ramp −5 %, nominal, +5 % × STO band edges and nominal), at three holds: none, half and the full nominal hold ({{syn.hw.matrix.holds.0|.3f}}, {{syn.hw.matrix.holds.1|.3f}}, {{syn.hw.matrix.holds.2|.3f}} N·m; SYNTHETIC). That covers every D-4 corner, and the upper-edge cell of the window: (iv), comm loss, {{in.rate_iv|.2f}} N·m/s, STO {{in.sto_comm|.0f}} ms, crossing {{syn.hw.matrix.upper_edge_t10|.2f}} ms at hold 0 (SYNTHETIC). Model crossing times:
+
+{{table:matrix}}
+
+   The {{syn.hw.matrix.n_cell}} per cell is the Rev U row 14 floor; a trial SD of {{in.s_dummy|g}} ms and a wanted precision of {{in.e_dummy|g}} ms on the mean ask for {{syn.hw.matrix.n_formula|.2f}} drops (both ASSUMPTIONS; SYNTHETIC formula).
+   **Per-trial pass:** crossing at or after {{syn.hw.budget.t10_min_pass_ms|.2f}} ms ({{in.catch|.0f}} ms plus U_t), **or** drop at {{in.catch|.0f}} ms at most {{syn.hw.budget.drop200_max_pass_deg|.3f}}° ({{in.drop|.0f}}° minus the angle uncertainty) (SYNTHETIC thresholds). Either reading may be used; a trial where only one passes is reported. **Per cell:** the mean crossing agrees with the model within ±{{in.tol_model|g}} ms (ASSUMPTION). Every model cell passes the per-trial rule with room: the worst model drop at {{in.catch|.0f}} ms is {{syn.hw.budget.worst_drop200_deg|.3f}}° (SYNTHETIC).
+7. Any cell that fails stops Phase A. If the governing cell's crossing is outside the model by more than the agreement, the fixed window is wrong: stop and go to Charlie (via Seren).
 
 **Gate to Phase B:** Phase A passed, IRB approval in hand, ICC / trials per subject / allowed drops registered, and Charlie's explicit go after reading section 6.
 
@@ -63,7 +89,7 @@ B-A15 is the project's human catch model: the user arrests the arm at exactly {{
 
 | Score | Rule |
 |---|---|
-| **DROP** | t_c + U_t > {{in.win_lo|.2f}} ms (SYNTHETIC edge), **or** measured peak drop + angle uncertainty > {{in.drop|.0f}}°, **or** the passive stop is touched |
+| **DROP** | t_c + U_t > {{in.win_lo|.2f}} ms (SYNTHETIC edge), with the proven U_t ({{syn.hw.budget.u_t_ms|.3f}} ms, SYNTHETIC budget), **or** measured peak drop + angle uncertainty ({{syn.hw.budget.ang_unc_deg|.4f}}°) > {{in.drop|.0f}}°, **or** the passive stop is touched |
 | **NO DROP** | valid trial and none of the above |
 | **INVALID** | rig fault (ramp slower than {{in.rate|.2f}} N·m/s, STO later than {{in.sto|.0f}} ms, lost sensor or clock), or EMG activity before onset showing the subject was not relaxed |
 
@@ -163,15 +189,17 @@ With subjects inflated for the ICC (m = {{in.m}}). "Best case" is the mix of sub
 | Group | Channels |
 |---|---|
 | Identity | coded subject, session, trial number, fault or sham, random wait, test cell, operator, firmware commit, plan version |
-| Commands | ramp rate, STO time, fault-onset trigger, latch-release time |
+| Commands | ramp rate and STO time commanded **and measured as delivered** (firmware test mode), fault-onset trigger, latch-release time |
 | Torque | commanded and measured joint torque (device side), arm-side torque at the cuff, k used, torque-trip state |
 | Hold | latch load before release (arm side), payload mass, subject arm mass estimate |
-| Motion | elbow angle and speed, peak drop, drop at {{in.catch|.0f}} ms, catch time t_c, passive-stop contact |
+| Motion | elbow angle and speed, **raw encoder counts**, peak drop, drop at {{in.catch|.0f}} ms, catch time t_c |
+| Rig | **stop contact force and stroke**, **rig power-cut and guard-interlock state**, torque-trip state |
 | EMG / IMU | biceps and triceps EMG and IMU at the repo defaults ({{in.emg_hz}} / {{in.imu_hz}} Hz, unchanged), pre-onset EMG onset flag |
-| Timing | clock-sync error, sample-drop count, U_t in force |
+| Timing | **fault and release timestamps on one clock, with the measured skew between them**, clock-sync error, sample-drop count, U_t in force |
+| Dummy | **mass, inertia and gravity-moment calibration records** (before and after each day), the matrix cell and the model crossing it is compared with |
 | Outcome | DROP / NO DROP / INVALID, reason, who decided and when, blinding flag, adverse event, comfort report |
 
-The {{in.imu_hz}} Hz IMU has one sample every {{in.imu_ms|.1f}} ms and cannot score a {{in.res|g}} ms criterion. The score uses the rig's own angle and torque channels at {{in.daq_khz|.0f}} kHz or faster ({{in.res|g}} ms per sample; Rev U row 14 asks for a tenth of the window, {{syn.res_req|.2f}} ms SYNTHETIC, rounded down). Raw data are kept. Nothing is deleted.
+All rig channels are logged at {{syn.hw.budget.fs_khz|.0f}} kHz or faster (the budget in section 3; one sample every {{syn.hw.budget.period_ms|.4f}} ms, SYNTHETIC). The {{in.imu_hz}} Hz IMU has one sample every {{in.imu_ms|.1f}} ms and cannot score the criterion; it is logged only as a cross-check at the repo defaults. Raw data are kept. Nothing is deleted.
 
 ## 8. Assumptions (unsourced unless stated)
 
@@ -186,19 +214,25 @@ The {{in.imu_hz}} Hz IMU has one sample every {{in.imu_ms|.1f}} ms and cannot sc
 | A7 | Subjects are independent and represent the users; subject population not set |
 | A8 | Testing only the governing cell is enough; catch time does not depend on the path |
 | A9 | Score combines catch time and angle, with uncertainty added against a pass |
-| A10 | Passive stop at {{in.stop|.0f}}°, model agreement {{in.tol_model|g}} ms, gravity-moment error ±{{in.g_unc|pct}} (HE scoping) |
+| A10 | Subject gravity moment known to ±{{in.g_unc|pct}} (HE scoping) |
 | A11 | Latch release and shams give no usable cue; one sham per fault trial |
 | A12 | "Relaxed" means the EMG onset detector at unchanged defaults stays silent |
 | A13 | (SYNTHETIC) FC's {{in.fc_lo|pct}}–{{in.fc_hi|pct}}: linear extrapolation of [PRU09], normal catch times, SD {{in.pru_sd|.0f}} ms, ± read as SD |
 | A14 | [PRU09] transfers to this task (step torque, horizontal plane, practised subjects there; ramp, vertical, unprepared here) |
+| A15 | Timing budget: {{in.budget_pct|pct}} of the smallest model margin, split {{in.alloc.sample|pct}} sampling, {{in.alloc.trigger|pct}} trigger, {{in.alloc.release|pct}} release, {{in.alloc.angle|pct}} angle, {{in.alloc.enc_lat|pct}} encoder latency, {{in.alloc.spare|pct}} spare; sampling rounded up to {{in.step_khz}} kHz steps (HE, reusing the Rev U row-8 rule) |
+| A16 | Model agreement of {{in.tol_model|g}} ms, split equally over four inputs (net torque, J, G, k) |
+| A17 | Dummy trial SD {{in.s_dummy|g}} ms, wanted precision {{in.e_dummy|g}} ms, {{in.reset_min|g}} min per reset |
+| A18 | Rig: stop at {{in.stop|.0f}}° with a {{in.th_stroke|.0f}}° stroke, upper stop at +{{in.th_up|.0f}}°, contact radius {{in.r_stopc|.2f}} m, clearance {{in.clr_mm|.0f}} mm, absorber peak {{in.abs_profile|g}} × the ideal force, torque trip {{in.trip_pct|pct}} over k·T0, device-at-cap runaway case (HE) |
+| A19 | **Firmware test mode** that sets ramp {{in.rate|.2f}} N·m/s and STO {{in.sto|.0f}} ms without changing the fault path. Open risk: **must be verified** |
 
 ## 9. Open items
 
 1. Charlie: run Phase B at all, given section 6?
 2. Charlie: {{stat.plan.subjects}} × {{in.m}} or {{in.n0}} × one? ICC value? Which paths need their own sample?
 3. FC / Charlie: confirm the combined score (A9).
-4. HE: allowed ramp and STO overshoot on the rig; latch design; absorber proof; Rev U row 14 still says the window is recomputed per hold torque.
-5. IRB: criteria, consent, adverse events, rest times, sham ratio.
+4. HE: allowed ramp and STO overshoot on the rig; latch design; absorber proof on the dummy; Rev U row 14 still says the window is recomputed per hold torque.
+5. HE / firmware: **the test mode (A19) must be verified**: ramp {{in.rate|.2f}} N·m/s and STO {{in.sto|.0f}} ms delivered as set, fault path unchanged.
+6. IRB: criteria, consent, adverse events, rest times, sham ratio.
 
 ## References
 

@@ -50,7 +50,7 @@ def test_template_guard_catches_literals_and_missing_labels():
 
 
 def test_synthetic_tables_are_labelled(R):
-    for name in ("feas", "feas_icc", "pru"):
+    for name in ("feas", "feas_icc", "pru", "budget", "absorber", "flip", "matrix"):
         assert "SYNTHETIC" in nc.tables(R)[name].splitlines()[0]
 
 
@@ -71,17 +71,20 @@ def test_allowed_drop_n_is_smallest(c, n):
     assert nc.cp_upper(c, n) == pytest.approx(_upper(c, n), rel=1e-9)
 
 
-def _rk4_crossing(rate, sto, td, hold, dt=1e-5):
-    """Independent fixed-step RK4 in the absolute elbow angle (90 deg at start)."""
+def _rk4(rate, sto, td, hold, t_end=None, J=None, G=None, k=None, T0=None, ang=None, dt=1e-5):
+    """Independent fixed-step RK4 in the absolute elbow angle (90 deg at start).
+    Returns the time (ms) at which the drop reaches ``ang`` deg, or the drop (deg) at ``t_end``."""
     A = nc.arm()
+    J, G = J or A["J"], G or A["G"]
+    k, T0 = k or nc.K_HI, T0 or nc.T0_DEV
     brk = round(sto / dt)
 
     def acc(th, t, off):
-        T = 0.0 if off else (nc.T0_DEV if t < td else max(nc.T0_DEV - rate * (t - td), 0.0))
-        return (nc.K_HI * T + hold - A["G"] * math.sin(th)) / A["J"]
+        T = 0.0 if off else (T0 if t < td else max(T0 - rate * (t - td), 0.0))
+        return (k * T + hold - G * math.sin(th)) / J
 
     th, w, prev = math.pi / 2, 0.0, 0.0
-    for i in range(30000):
+    for i in range(round((t_end or 0.4) / dt)):
         t, off = i * dt, i >= brk
         k1 = (w, acc(th, t, off))
         k2 = (w + dt / 2 * k1[1], acc(th + dt / 2 * k1[0], t + dt / 2, off))
@@ -90,10 +93,15 @@ def _rk4_crossing(rate, sto, td, hold, dt=1e-5):
         th += dt / 6 * (k1[0] + 2 * k2[0] + 2 * k3[0] + k4[0])
         w += dt / 6 * (k1[1] + 2 * k2[1] + 2 * k3[1] + k4[1])
         d = 90 - math.degrees(th)
-        if d >= nc.DROP_LIM:
-            return 1e3 * (t + dt * (nc.DROP_LIM - prev) / (d - prev))
+        if ang is not None and d >= ang:
+            return 1e3 * (t + dt * (ang - prev) / (d - prev))
         prev = d
-    raise AssertionError
+    assert ang is None
+    return 90 - math.degrees(th)
+
+
+def _rk4_crossing(rate, sto, td, hold):
+    return _rk4(rate, sto, td, hold, ang=nc.DROP_LIM)
 
 
 def test_window_matches_decision_and_independent_integrator(R):
@@ -184,3 +192,99 @@ def test_plan_states_ethics_and_assumptions():
     plan = nc.PLAN.read_text(encoding="utf-8")
     assert "Human testing needs ethics (IRB) approval before any trial" in plan
     assert "| A1 | The 10° drop limit" in plan and "| A2 | The 200 ms catch" in plan
+
+
+def test_grid_has_every_cell_and_matches_independent_rk4(R):
+    grid = nc.build_grid()
+    assert len(grid) == 117 and len({k[:4] for k in grid}) == 39
+    assert min(v["t10"] for v in grid.values()) == pytest.approx(R["syn"]["lo"])
+    A = nc.arm()
+    for key in [("b", "estop", 21.0, 148.0, 0.0), ("iv", "comm", 19.95, 142.0, 0.0),
+                ("b", "emg", 50.0, None, 1.0), ("iv", "estop", 18.05, 160.0, 0.5)]:
+        o, path, rate, sto, hf = key
+        v = next(x for kk, x in grid.items() if kk[0] == o and kk[1] == path and kk[3] == sto
+                 and kk[4] == hf and kk[2] == pytest.approx(rate))
+        hold, td = hf * A["hold_nom"], nc.T_DET[path] / 1e3
+        sto_s = 1e9 if sto is None else sto / 1e3
+        assert _rk4(rate, sto_s, td, hold, ang=nc.DROP_LIM) == pytest.approx(v["t10"], abs=2e-3)
+        assert _rk4(rate, sto_s, td, hold, t_end=0.2) == pytest.approx(v["drop200"], abs=2e-3)
+
+
+def test_matrix_counts_and_rows(R):
+    m = R["syn"]["hw"]["matrix"]
+    assert (m["n_cells"], m["n_types"], m["n_b"], m["n_iv"]) == (117, 39, 21, 18)
+    assert (m["n_cell"], m["drops"], m["hours"]) == (10, 1170, 19.5)
+    assert m["n_formula"] == pytest.approx((norm_z() * 0.15 / 0.1) ** 2)
+    assert len(m["rows"]) == 39 and all(a < b < c for a, b, c in (r["t10"] for r in m["rows"]))
+    assert min(r["t10"][0] for r in m["rows"]) == pytest.approx(R["syn"]["lo"])
+    assert m["upper_edge_t10"] == pytest.approx(R["syn"]["hi"])
+
+
+def norm_z():
+    from scipy.stats import norm
+    return float(norm.ppf(0.975))
+
+
+def test_timing_budget_is_consistent(R):
+    b = R["syn"]["hw"]["budget"]
+    assert b["margin_ms"] == pytest.approx(R["syn"]["margin_ms"])
+    assert b["budget_ms"] == pytest.approx(0.1 * b["margin_ms"])
+    assert b["fs_khz"] % 5 == 0 and b["fs_khz"] >= b["fs_min_khz"] > b["fs_khz"] - 5
+    assert b["fs_khz"] == 15 and round(b["fs_min_khz"], 1) == 13.1
+    assert b["counts"] == 2 ** b["bits"] >= b["counts_min"] > b["counts"] / 2
+    assert b["enc_res_deg"] <= b["ang_max_deg"]
+    parts = b["period_ms"] + b["trigger_ms"] + b["release_ms"] + b["enc_lat_ms"] + b["ang_time_ms"]
+    assert b["u_t_ms"] == pytest.approx(parts) and b["ok"] and b["u_t_ms"] < b["budget_ms"]
+    assert b["trigger_ms"] + b["release_ms"] + b["enc_lat_ms"] + b["spare_ms"] + b["period_max_ms"] + \
+        b["ang_max_deg"] / b["w10_min"] * 1e3 == pytest.approx(b["budget_ms"])
+    assert b["t10_min_pass_ms"] == pytest.approx(200 + b["u_t_ms"])
+    assert b["drop200_max_pass_deg"] == pytest.approx(10 - b["ang_unc_deg"])
+    assert b["worst_drop200_deg"] < b["drop200_max_pass_deg"]  # every model cell passes the per-trial rule
+
+
+def test_rig_energies_match_the_ode_and_closed_forms(R):
+    rg, A = R["syn"]["hw"]["rig"], nc.arm()
+    assert rg["ff_stop_w"] == pytest.approx(rg["w_ff_energy"], rel=1e-9)  # ODE speed = energy speed
+    assert rg["ff_stop_w"] == pytest.approx(229.18, abs=0.01)
+    assert rg["ff_stop_ms"] == pytest.approx(130.30, abs=0.01)
+    th = math.radians
+    assert rg["E_ff_total"] == pytest.approx(A["G"] * math.sin(th(25)))
+    assert rg["E_cap_total"] == pytest.approx(A["G"] * math.sin(th(25)) + nc.K_HI * nc.T_CAP_DEV * th(25))
+    assert rg["E_cap_total"] > rg["E_ff_total"]
+    assert rg["T_abs_ideal"] * th(10) == pytest.approx(rg["E_cap_total"])
+    assert rg["T_abs_peak"] == pytest.approx(1.5 * rg["T_abs_ideal"])
+    assert rg["F_abs_peak"] * 0.20 == pytest.approx(rg["T_abs_peak"])
+    assert rg["E_up"] == pytest.approx((rg["kcap"] + A["hold_nom"]) * th(15) - A["G"] * math.sin(th(15)))
+    assert rg["trip_Nm"] == pytest.approx(11.0) and rg["r_guard"] == pytest.approx(0.425)
+    assert rg["sweep_mm"] == pytest.approx(400 * th(50), rel=1e-9)
+
+
+def test_flip_values_reach_ten_degrees_in_an_independent_integrator(R):
+    f, A = R["syn"]["hw"]["flip"], nc.arm()
+    g = R["syn"]["gov_key"]
+    rate, sto, td = g[1], g[2] / 1e3, nc.T_DET[g[0]] / 1e3
+    base = _rk4(rate, sto, td, 0.0, t_end=0.2)
+    assert base < 10
+    ms = nc.arm(f["mass"])
+    for kw in (dict(J=A["J"] * f["J"]), dict(J=ms["J"], G=ms["G"]), dict(T0=nc.T0_DEV * f["T0"]),
+               dict(k=nc.K_HI * f["k"]), dict(hold=-f["offset"])):
+        assert _rk4(rate, sto, td, kw.pop("hold", 0.0), t_end=0.2, **kw) == pytest.approx(10.0, abs=2e-3)
+    assert f["lag_ms"] == pytest.approx(R["syn"]["margin_ms"])
+    assert [round(x, 2) for x in R["syn"]["hw"]["flip_pct"].values()] == [-3.12, 1.29, -0.98, -1.22]
+
+
+def test_calibration_limits_follow_the_slopes(R):
+    c = R["syn"]["hw"]["cal"]
+    assert c["share_ms"] == pytest.approx(0.125)
+    assert c["net_torque_Nm"] == pytest.approx(0.125 / abs(c["slope_Th"]))
+    # raising G by 1 % is the same as lowering the net pre-onset torque by 0.01 G
+    assert abs(c["slope_G"]) == pytest.approx(abs(c["slope_Th"]) * nc.arm()["G"] / 100, rel=2e-3)
+    assert (round(c["net_torque_Nm"], 4), round(c["G_pct"], 3), round(c["J_pct"], 2)) == (0.0059, 0.057, 0.21)
+
+
+def test_plan_has_the_new_items():
+    plan = nc.PLAN.read_text(encoding="utf-8")
+    for need in ("independent of the device e-stop", "Interlocked guard", "Upper runaway stop",
+                 "must be verified", "raw encoder counts", "stop contact force and stroke",
+                 "calibration records", "measured skew", "1,170 drops"):
+        assert need in plan, need
