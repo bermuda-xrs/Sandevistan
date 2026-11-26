@@ -458,6 +458,17 @@ Disjoint studies cut from the same 16000 subjects.
 | 40 ms | 202/1000 = 0.202 (0.178–0.228) | 59/250 = 0.236 (0.185–0.294) | 0.26 | 0/1000 = 0.000 (0.000–0.004) | 0/250 = 0.000 (0.000–0.015) | 1.00 |
 | 80 ms | 8/1000 = 0.008 (0.003–0.016) | 3/250 = 0.012 (0.002–0.035) | 0.47 | 0/1000 = 0.000 (0.000–0.004) | 0/250 = 0.000 (0.000–0.015) | 1.00 |
 
+### Claim checks (numbers quoted in docs/sd_stress.md; SYNTHETIC)
+
+- False pass at 68.67 ms, with bias: 30 cells, point 0.000-0.036, CP upper bound 0.0037-0.0495; upper bound above 0.05 in 0 of 30 cells.
+- False pass at 68.67 ms, bias removed: 30 cells, point 0.038-0.048, CP upper bound 0.0518-0.0631; upper bound above 0.05 in 30 of 30 cells.
+- False pass at 68.67 ms, no detector: 6 cells, point 0.039-0.045, CP upper bound 0.0529-0.0598; upper bound above 0.05 in 6 of 6 cells.
+- Power at 16, bias removed against no detector: largest gap 0.013 (12/4/10, 40 ms rise).
+- Noncentral-t count over fitted count, with bias: 24 cells, +1.5% to +9.8%.
+- Noncentral-t count over fitted count, bias removed: 30 cells, +1.1% to +6.3%.
+- Noncentral-t count over fitted count, no detector: 6 cells, +0.6% to +6.4%.
+- Detector error, largest difference of any config from 8/6/10 over all rises and both true leads: mean error 0.006 ms, median error 0.013 ms, error SD 0.004 ms.
+
 ### Checks
 
 - Vectorised gate vs `LeadStats.summarize`: 0 mismatches in 120000 16-subject studies.

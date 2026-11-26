@@ -33,6 +33,7 @@ Usage (repo root):
   python scripts/sd_stress.py run --raw out/sd_stress/raw --procs 6     # restartable, skips done chunks
   python scripts/sd_stress.py score --raw out/sd_stress/raw --out out/sd_stress/scored.json --procs 6
   python scripts/sd_stress.py report out/sd_stress/scored.json --out out/sd_stress/tables.md
+  python scripts/sd_stress.py sensitivity --raw out/sd_stress/raw --out out/sd_stress/sensitivity.md
 """
 
 from __future__ import annotations
@@ -403,6 +404,40 @@ def _summary(D: dict, C: dict, T: dict) -> list[str]:
     return L + [""]
 
 
+def _claims(D: dict, C: dict, T: dict) -> list[str]:
+    """Numbers quoted in docs/sd_stress.md prose, computed here so each has a script and an output."""
+    P, Q = LEADS
+    cfgs = [tuple(c) for c in D["configs"]]
+    L = ["", "### Claim checks (numbers quoted in docs/sd_stress.md; SYNTHETIC)", ""]
+    fp = {"with bias": [C[(c, r, Q)]["raw"] for c in cfgs for r in RISES],
+          "bias removed": [C[(c, r, Q)]["unb"] for c in cfgs for r in RISES],
+          "no detector": [T[(c, Q)] for c in cfgs]}
+    for name, cells in fp.items():
+        ups = [sim.clopper_pearson(x["k"], x["m"])[1] for x in cells]
+        ps = [x["k"] / x["m"] for x in cells]
+        L.append(f"- False pass at {Q} ms, {name}: {len(cells)} cells, point {min(ps):.3f}-{max(ps):.3f}, "
+                 f"CP upper bound {min(ups):.4f}-{max(ups):.4f}; upper bound above 0.05 in "
+                 f"{sum(u > 0.05 for u in ups)} of {len(ups)} cells.")
+    gaps = [(abs(T[(c, P)]["k"] / T[(c, P)]["m"] - C[(c, r, P)]["unb"]["k"] / C[(c, r, P)]["unb"]["m"]), c, r)
+            for c in cfgs for r in RISES]
+    g = max(gaps)
+    L.append(f"- Power at {N_SUB}, bias removed against no detector: largest gap {g[0]:.3f} "
+             f"({cfg_name(g[1])}, {g[2]} ms rise).")
+    for name, cells in (("with bias", [C[(c, r, P)]["raw"]["need"] for c in cfgs for r in RISES]),
+                        ("bias removed", [C[(c, r, P)]["unb"]["need"] for c in cfgs for r in RISES]),
+                        ("no detector", [T[(c, P)]["need"] for c in cfgs])):
+        q = [d["nct"] / d["n80"] for d in cells if d["reachable"] and d.get("nct") and np.isfinite(d["n80"])]
+        L.append(f"- Noncentral-t count over fitted count, {name}: {len(q)} cells, "
+                 f"{(min(q) - 1) * 100:+.1f}% to {(max(q) - 1) * 100:+.1f}%.")
+    dev = {}
+    for key, lab in (("bias", "mean error"), ("median_err", "median error"), ("err_sd", "error SD")):
+        dev[lab] = max(abs(C[(c, r, ld)][key] - C[(DESIGN, r, ld)][key]) for c in cfgs for r in RISES
+                       for ld in LEADS)
+    L.append("- Detector error, largest difference of any config from 8/6/10 over all rises and both true "
+             "leads: " + ", ".join(f"{k} {v:.3f} ms" for k, v in dev.items()) + ".")
+    return L
+
+
 def cmd_report(a):
     D = json.loads(a.scored.read_text())
     C = {(tuple(D["configs"][c["cfg"]]), c["rise"], c["lead"]): c for c in D["cells"]}
@@ -486,6 +521,7 @@ def cmd_report(a):
             pv = stats.fisher_exact([[c["k"], c["m"] - c["k"]], [k, n - k]])[1]
             row += [_fmt(c["k"], c["m"]), _fmt(k, n), f"{pv:.2f}"]
         L.append("| " + " | ".join(row) + " |")
+    L += _claims(D, C, T)
     L += ["", "### Checks", ""]
     mm = sum(c[t]["vs_summarize"] for c in D["cells"] for t in ("raw", "unb"))
     nc = sum(c[t]["m"] for c in D["cells"] for t in ("raw", "unb"))
@@ -508,22 +544,54 @@ def cmd_report(a):
     print(text)
 
 
+SENS_MARGINS = (5.0, 5.5, 6.0, 6.5, 7.0, 7.5, 8.0, 9.0)  # ms; 6.0 is the protected margin
+
+
+def cmd_sensitivity(a):
+    """Gate pass rate when the margin between the true lead and the gate is not 6 ms.
+
+    Analysis of the stored chunks only (nothing is simulated). The detected leads of the 74.67 ms
+    trials are shifted by a constant, margin - 6 ms. That is exact for the no-detector rows; for the
+    detected rows it ignores that a different true lead moves the angle samples relative to the 150 Hz
+    grid, so it is an approximation. At margin 6.0 it reproduces the main tables.
+    """
+    _D.update(load(a.raw, a.studies, a.first))
+    L = ["ALL SYNTHETIC. Pass rate of the 16 x 3 x 10 gate vs the margin (true lead - 68.67 ms); detected "
+         f"leads shifted by margin - 6 ms. {a.studies} studies per cell, 95% Clopper-Pearson.", "",
+         "| SD | Lead | " + " | ".join(f"{m:g} ms" for m in SENS_MARGINS) + " |",
+         "|---|---|" + "---|" * len(SENS_MARGINS)]
+    for ci, c in enumerate(CONFIGS):
+        rows = [(f"{r} ms rise, with bias", (_D["imu"][:, ci, 0] - _D["emg"][:, ri]) * 1000.0)
+                for ri, r in enumerate(RISES)]
+        rows.append(("no detector", LEADS[0] + _D["off"][:, ci]))
+        for name, lead in rows:
+            cells = []
+            for m in SENS_MARGINS:
+                mean, miss = subject_stats(lead + (m - 6.0))
+                p = gate_blocks(mean, miss, N_SUB)
+                cells.append(sim.fmt(int(p.sum()), int(p.size)))
+            L.append(f"| {cfg_name(c)} | {name} | " + " | ".join(cells) + " |")
+    text = "\n".join(L) + "\n"
+    a.out.write_text(text)
+    print(text)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("run", "score"):
+    for name in ("run", "score", "sensitivity"):
         s = sub.add_parser(name)
         s.add_argument("--raw", type=Path, required=True)
         s.add_argument("--studies", type=int, default=N_STUDIES, help="smoke tests only")
         s.add_argument("--first", type=int, default=STUDY0)
         s.add_argument("--procs", type=int, default=6)
-        if name == "score":
+        if name != "run":
             s.add_argument("--out", type=Path, required=True)
     s = sub.add_parser("report")
     s.add_argument("scored", type=Path)
     s.add_argument("--out", type=Path, required=True)
     a = ap.parse_args(argv)
-    {"run": cmd_run, "score": cmd_score, "report": cmd_report}[a.cmd](a)
+    {"run": cmd_run, "score": cmd_score, "report": cmd_report, "sensitivity": cmd_sensitivity}[a.cmd](a)
 
 
 if __name__ == "__main__":
