@@ -288,3 +288,79 @@ def test_plan_has_the_new_items():
                  "must be verified", "raw encoder counts", "stop contact force and stroke",
                  "calibration records", "measured skew", "1,170 drops"):
         assert need in plan, need
+
+
+# ---- fix round 2 (FC PR9_verdict.md) and Charlie's design decision (59 x 1)
+def test_chosen_design_false_pass_is_the_same_at_every_icc(R):
+    c = R["stat"]["chosen"]
+    assert c["m"] == 1 and c["subjects"] == 59
+    assert all(x == pytest.approx(0.95**59, rel=1e-12) for x in c["false_pass"])
+    assert round(100 * c["false_pass_max"], 2) == 4.85
+    for icc in (0.0, 0.3, 0.7, 1.0):  # beyond the table: one trial per subject never depends on the ICC
+        for pmf in (nc.pmf_bb, nc.pmf_two):
+            assert nc.p_total_le(pmf(0.05, icc, 1, 0), 59, 0) == pytest.approx(0.95**59, rel=1e-12)
+
+
+def test_rejected_33x10_false_pass_above_registered_icc(R):
+    s = R["stat"]
+    assert s["plan"]["subjects"] == 33 and s["plan"]["trials"] == 330
+    assert 330 / (1 + 9 * s["alt_icc_break"]) == pytest.approx(59)
+    assert round(s["alt_icc_break"], 4) == 0.5104
+    risk = {r["icc"]: r for r in s["alt_risk"]}
+
+    def worst(icc):  # never/sometimes-drop mix, written out
+        q = 0.05 + (1 - 0.05) * icc
+        w = 0.05 / q
+        return (1 - w + w * (1 - q) ** 10) ** 33
+
+    for icc, want_worst, want_bb in ((0.6, 0.0624, 0.0173), (0.8, 0.1221, 0.0653), (1.0, 0.1840, 0.1840)):
+        assert risk[icc]["worst"] == pytest.approx(worst(icc), rel=1e-12)
+        assert round(risk[icc]["worst"], 4) == want_worst and round(risk[icc]["bb"], 4) == want_bb
+
+
+def test_bound_over_every_allowed_m_and_undersized_best_case(R):
+    f = R["syn"]["feas"]
+    lo, hi = f["sup_any_m"]["lo"], f["sup_any_m"]["hi"]
+    assert (lo["m"], lo["icc"], lo["subjects"]) == (46, 0.012, 2) == (hi["m"], hi["icc"], hi["subjects"])
+    q = 0.2 + 0.8 * 0.012
+    w = 0.2 / q
+    assert lo["P"] == pytest.approx((1 - w + w * (1 - q) ** 46) ** 2, rel=1e-12)
+    assert round(lo["P"], 4) == 0.0021 and round(hi["P"], 5) == 0.00057
+    assert f["max_pass"] < lo["P"]  # the tabulated bound is the smaller one
+    assert round(f["undersized"], 4) == 0.0242 and round(f["undersized_best"], 4) == 0.0878
+
+
+def test_stop_contact_probabilities(R):
+    from scipy.stats import norm
+
+    rg, c = R["syn"]["hw"]["rig"], R["syn"]["feas"]["contact"]
+    for lab, mu in (("nominal hold", R["syn"]["fc_mean"]), ("zero hold", 204.5)):
+        v = c[lab]
+        assert v["p_contact_gov"] == pytest.approx(norm.sf(rg["t_stop_gov"], mu, 16.0))
+        assert v["p_contact_first15"] == pytest.approx(norm.sf(rg["t_stop_min"], mu, 16.0))
+        pd, pc = v["p_drop"], v["p_contact_gov"]
+        brute = sum((1 - pd) ** i * pc for i in range(59))  # the study halts at its first DROP
+        assert v["p_study_contact"] == pytest.approx(brute, rel=1e-12)
+    assert [round(100 * c[k]["p_contact_first15"], 2) for k in c] == [4.53, 6.96]
+
+
+def test_stop_gaps_duplicates_and_bandwidth(R):
+    hw = R["syn"]["hw"]
+    rg, m = hw["rig"], hw["matrix"]
+    assert rg["first15_cell"] == "b|comm|21.0|142.0|0.0"
+    assert (round(rg["gap_first15_ms"], 2), round(rg["gap_gov_ms"], 2)) == (26.20, 26.58)
+    assert (m["dup_cells"], m["dup_types"], m["distinct"], m["distinct_drops"]) == (18, 6, 99, 990)
+    assert m["dup_drops"] + m["distinct_drops"] == m["drops"]
+    assert hw["budget"]["bw_enc_khz"] == pytest.approx(0.35 / hw["budget"]["enc_lat_ms"])
+    assert round(hw["budget"]["bw_enc_khz"], 1) == 18.4
+
+
+def test_plan_has_round_2_items():
+    plan = nc.PLAN.read_text(encoding="utf-8")
+    for need in ("OPEN SAFETY ITEM THAT BLOCKS PHASE B", "No limit is invented here",
+                 "## 4b. Rejected alternatives", "59 subjects × one fault trial each",
+                 "Stop holder (requirement)",
+                 "Subject stop button (requirement)", "release skew over", "18.4 kHz",
+                 "only for the tabulated options", "8.78 %", "26.20 ms", "26.58 ms", "repeat a setting"):
+        assert need in plan, need
+    assert "proven timing uncertainty" not in plan and "proven U_t" not in plan

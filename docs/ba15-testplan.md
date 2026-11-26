@@ -12,10 +12,11 @@
 
 1. **Window (Charlie, 1a):** one fixed relaxed-hold catch-time window for every subject, 201.90–203.72 ms (SYNTHETIC). No per-subject recompute.
 2. **Pass rule (Charlie, 2b):** show P(drop past 10°) ≤ 5 % at 95 % one-sided confidence with zero drops in 59 independent trials.
-3. **Subjects:** with 10 trials each, 6 to 33 subjects for an ICC of 0 to 0.5; 59 for any ICC. Planning default: 33 subjects × 10 trials (ICC 0.5, ASSUMPTION).
+3. **Design (Charlie, 2026-11-26 01:25 KST): 59 subjects × one fault trial each.** Its false-pass chance is 4.85 % at any ICC (section 4). The earlier 33 × 10 default is in "Rejected alternatives" (section 4b).
 4. **Any drop:** stop, investigate, and the test has FAILED. No extension unless it was registered before trial 1.
-5. **Dummy phase first:** 117 cells × 10 drops = 1,170 drops, about 19.5 h (ASSUMPTION: 1 min per reset), with a proven timing uncertainty of 0.160 ms (SYNTHETIC budget, section 3).
-6. **Feasibility: this plan will almost certainly fail on the current design.** If the true drop probability is FC's 20 %–33 %, the chance of passing is at most 2.4e-05 (SYNTHETIC) (about one in 41,267) over every ICC, trials-per-subject and allowed-drop option in this plan. Section 6 says what that means.
+5. **Dummy phase first:** 117 cells × 10 drops = 1,170 drops, about 19.5 h (ASSUMPTION: 1 min per reset). Timing uncertainty is a requirement, at most 0.160 ms (SYNTHETIC budget, section 3), until it is measured on the rig.
+6. **OPEN SAFETY ITEM THAT BLOCKS PHASE B:** there is no sourced human tolerance limit for an arm hitting the 15° stop (section 2). Phase B cannot start until there is one.
+7. **Feasibility: this plan will almost certainly fail on the current design.** If the true drop probability is FC's 20 %–33 %, the chosen design passes with chance 1.9e-06 to 5.5e-11 (SYNTHETIC). Section 6 gives the bound over the other options and says what it means.
 
 ## 1. What is tested
 
@@ -42,9 +43,11 @@ B-A15 is the project's human catch model: the user arrests the arm at exactly 20
 - **Rig safety (HE scoping; ASSUMPTIONS until built and proven on the dummy).** A person may not use the rig until every item is proven:
   1. **Rig power cut, independent of the device e-stop.** One cut removes power from the rig's latch, hold emulator and drives, and works with the device e-stop bypassed or failed.
   2. **Interlocked guard** over the 0.425 m sweep (payload tip 0.40 m plus 25 mm clearance). The tip sweeps 349 mm of arc between 65° and 115° (SYNTHETIC geometry). Opening the guard cuts rig power.
-  3. **Passive lower stop** at 15° drop with a 10° absorber stroke, sized in the table below. A drop of 10° is 15 − 10 = 5° short of it; in the earliest cell the arm gets there 26.3 ms after its 10° crossing, and no cell reaches it before 228.2 ms (SYNTHETIC).
+  3. **Passive lower stop** at 15° drop with a 10° absorber stroke, sized in the table below. In the Phase B test cell an uncaught arm reaches it 26.58 ms after its 10° crossing, at 228.49 ms. The earliest contact of any cell is 228.16 ms, in (b) comm loss 21.00 N·m/s, STO 142 ms, 26.20 ms after that cell's own 10° crossing (SYNTHETIC).
   4. **Upper runaway stop** at +15° above the start, for a device that drives upward.
   5. **Torque trip** at 11.0 N·m at the arm (SYNTHETIC k·T0 basis, ASSUMPTION).
+  6. **Stop holder (requirement).** One person, named in the IRB protocol, whose only task during a trial is to hold the rig power cut and use it. Not the operator running the trial.
+  7. **Subject stop button (requirement).** A stop the subject holds in the free hand, which cuts rig power. "Subject asks to stop" must not depend on speech alone.
 
 | SYNTHETIC rig case | Energy | Speed or force |
 |---|---|---|
@@ -55,6 +58,14 @@ B-A15 is the project's human catch model: the user arrests the arm at exactly 20
 | Rig torque trip (+10 % over k × T0) | 11.0 N·m at the arm | ASSUMPTION |
 
   The absorber is sized by the larger case. The no-hold free fall sets the lowest case; with the device driving at its cap the stroke must absorb 9.82 J, against 4.35 J for free fall (SYNTHETIC). The stop is hit at 342 °/s in the larger case, not the 229 °/s of free fall (SYNTHETIC).
+
+- **OPEN SAFETY ITEM THAT BLOCKS PHASE B: no human tolerance limit for hitting the 15° stop.**
+  - The absorber above is sized for the rig, not for a person.
+  - In Phase B an uncaught arm reaches the stop at 211 °/s in the test cell (SYNTHETIC). In the runaway case it is 342 °/s, with 84.4 N·m and 422 N at the contact (SYNTHETIC).
+  - With the S7 catch model (normal, SD 16 ms), the share of Phase B trials whose catch comes after the test cell's stop contact is 4.34 % (nominal-hold mean) to 6.69 % (zero-hold mean) (SYNTHETIC). FC's 4.53 %–6.96 % uses the earliest contact of any cell (SYNTHETIC).
+  - The stop rules halt at the first DROP, so at most one person hits the stop. But that person still takes it: the chance that the study ends on a stop contact is 9.05 % to 11.86 % (SYNTHETIC).
+  - **No sourced limit exists in this plan.** FC notes that ISO/TS 15066 has body-region limits but holds no clause text (`PR9_verdict.md` row 12); the S7 search could not read it either. No other source was found. **No limit is invented here.**
+  - **Phase B is blocked until** a sourced human tolerance for this contact (speed, force or energy at the forearm) is in the plan, and the stop is shown on the dummy to stay within it.
 
 ## 3. Procedure
 
@@ -71,12 +82,14 @@ B-A15 is the project's human catch model: the user arrests the arm at exactly 20
 | Trigger skew | at most 0.019 ms | 10 % |
 | Release skew | at most 0.038 ms | 20 % |
 | Encoder latency | at most 0.019 ms | 10 % |
+| Encoder bandwidth | at least 18.4 kHz | 0.35 / encoder latency (first-order rise time, ASSUMPTION) |
 | Angle resolution | at most 0.0031° (17-bit: 131,072 counts, 0.00275°) | 10 % at the slowest 160.4 °/s crossing; 0.0171 ms |
 | Spare | 0.019 ms | 10 % |
 | **Used, U_t** | **at most 0.160 ms** | 0.0667 + 0.0190 + 0.0381 + 0.0190 + 0.0171 ms, against 0.190 ms |
 | Headroom | 0.030 ms | 0.190 − 0.160 ms |
 | Angle uncertainty | at most 0.0263° | encoder step plus 164.7 °/s times the timing terms |
 
+   Every term is a **requirement** until it is measured on the rig. If a measured term is over its share, Phase A stops until it is fixed. In Phase B, a trial whose measured release skew is over 0.038 ms is INVALID (SYNTHETIC limit). A late release holds the arm while the torque ramps down, which makes the trial easier. A drop in such a trial still triggers the stop rules. The torque and force channels have no bandwidth requirement yet (open item).
    The sampling period of 0.0667 ms is also within the 0.1 ms timing resolution that Rev U row 14 asks for (a tenth of the 1.81 ms window, rounded down; SYNTHETIC).
 4. **Calibrate** the dummy. The flip values show how little the model can be off before a failing unit would read as passing; the calibration limits come from splitting the 0.5 ms model agreement (ASSUMPTION) equally over four inputs (25 % each):
 
@@ -136,11 +149,12 @@ B-A15 is the project's human catch model: the user arrests the arm at exactly 20
 | (iv) comm 19.95 N·m/s, STO 150 ms | 206.38 | 209.69 | 213.11 |
 | (iv) comm 19.95 N·m/s, STO 160 ms | 209.25 | 212.74 | 216.33 |
 
+   18 of the 117 cells (6 types × 3 holds) repeat a setting already in the matrix, because the (b) −5 % rate equals the (iv) nominal rate: e-stop and comm loss at 19.00 N·m/s, all three STO values (SYNTHETIC count). They are kept as replication: 180 drops, 3.0 h. Dropping them leaves 99 distinct cells, 990 drops and 16.5 h. HE decides.
    The 10 per cell is the Rev U row 14 floor; a trial SD of 0.15 ms and a wanted precision of 0.1 ms on the mean ask for 8.64 drops (both ASSUMPTIONS; SYNTHETIC formula).
    **Per-trial pass:** crossing at or after 200.16 ms (200 ms plus U_t), **or** drop at 200 ms at most 9.974° (10° minus the angle uncertainty) (SYNTHETIC thresholds). Either reading may be used; a trial where only one passes is reported. **Per cell:** the mean crossing agrees with the model within ±0.5 ms (ASSUMPTION). Every model cell passes the per-trial rule with room: the worst model drop at 200 ms is 9.689° (SYNTHETIC).
 7. Any cell that fails stops Phase A. If the governing cell's crossing is outside the model by more than the agreement, the fixed window is wrong: stop and go to Charlie (via Seren).
 
-**Gate to Phase B:** Phase A passed, IRB approval in hand, ICC / trials per subject / allowed drops registered, and Charlie's explicit go after reading section 6.
+**Gate to Phase B:** Phase A passed; **the open safety item of section 2 closed** (a sourced human tolerance for stop contact, met on the dummy); stop holder named and subject stop button fitted; IRB approval in hand; allowed drops registered (default zero); and Charlie's explicit go after reading section 6.
 
 **Phase B: people.**
 1. One test cell only: e-stop fault, ramp 21.00 N·m/s, STO 148 ms, relaxed hold. It has the earliest model crossing, so a given catch time is hardest to pass there (ASSUMPTION: a subject's catch time does not depend on which path failed). **A pass covers only the cell tested.** To claim each path separately, each needs its own full sample.
@@ -148,16 +162,16 @@ B-A15 is the project's human catch model: the user arrests the arm at exactly 20
 3. Tell the subject to relax and to stop the arm only if it falls. Use no countdown and mask sound.
 4. Random wait of 1 to 4 s before onset, as in [PRU09]. Mix in sham releases (latch opens, no fault) at random, one sham per fault trial (ASSUMPTION). A relaxed arm still sags slowly in a sham, so shams are never scored.
 5. Fault onset is time zero. The catch time is from onset to arrest complete (arm speed zero), as in Rev U row 14.
-6. Reset, rest, repeat up to 10 fault trials. Rest length is open.
-7. No practice with the real fault. The unprepared user is the hazard, and [PRU09] subjects were practised. Trial number is logged so a learning trend can be seen.
+6. **One fault trial per subject** (Charlie's design), with the shams mixed in before and after it. Then the subject's session ends.
+7. No practice with the real fault. The unprepared user is the hazard, and [PRU09] subjects were practised. With one fault trial per subject, every fault is a first exposure.
 
-**Trial score (fixed before trial 1).** Let t_c be the measured catch time and U_t the proven timing uncertainty.
+**Trial score (fixed before trial 1).** Let t_c be the measured catch time and U_t the measured timing uncertainty.
 
 | Score | Rule |
 |---|---|
-| **DROP** | t_c + U_t > 201.90 ms (SYNTHETIC edge), with the proven U_t (0.160 ms, SYNTHETIC budget), **or** measured peak drop + angle uncertainty (0.0263°) > 10°, **or** the passive stop is touched |
+| **DROP** | t_c + U_t > 201.90 ms (SYNTHETIC edge), where U_t is the measured timing uncertainty, required to be at most 0.160 ms (SYNTHETIC budget requirement), **or** measured peak drop + angle uncertainty (0.0263°) > 10°, **or** the passive stop is touched |
 | **NO DROP** | valid trial and none of the above |
-| **INVALID** | rig fault (ramp slower than 21.00 N·m/s, STO later than 148 ms, lost sensor or clock), or EMG activity before onset showing the subject was not relaxed |
+| **INVALID** | rig fault (ramp slower than 21.00 N·m/s, STO later than 148 ms, release skew over 0.038 ms (SYNTHETIC limit), lost sensor or clock), or EMG activity before onset showing the subject was not relaxed |
 
 - Using both time and angle makes the score stricter than either alone, so a pass holds for both readings of "drop past 10°" (ASSUMPTION: this is how 1a and 2b combine; for FC and Charlie to confirm).
 - Not relaxed means the repo EMG onset detector, at its unchanged defaults, fires during the wait (ASSUMPTION).
@@ -167,6 +181,8 @@ B-A15 is the project's human catch model: the user arrests the arm at exactly 20
 ## 4. Sample size
 
 **Independent trials.** Zero drops in n shows P ≤ 5 % at 95 % one-sided confidence when the chance of zero drops at exactly 5 % is at most 5 % (the exact one-sided Clopper–Pearson bound [CP34]; zero-event case [HL83]). 59 is the smallest such n: at n = 59 the chance is 0.04849; one trial fewer gives 0.05105. **Verified.**
+
+**Chosen design (Charlie, 2026-11-26 01:25 KST): 59 subjects × one fault trial each, 59 fault trials in total.**
 
 **Repeated trials in one subject are correlated.** The design effect is DE = 1 + (m − 1)·ICC, for m trials per subject. Effective sample size = trials / DE [DBB81, RS92]. We checked the formula on the published example in [KMP04] (DE 1.527, effective size 83.8; the paper gives the same DE and a rounded size). Subjects = ceil(n·DE/m). Entries are subjects (total fault trials):
 
@@ -178,10 +194,32 @@ B-A15 is the project's human catch model: the user arrests the arm at exactly 20
 | 10 | 6 (60) | 9 (90) | 12 (120) | 17 (170) | 22 (220) | 33 (330) | 49 (490) | 59 (590) |
 | 20 | 3 (60) | 6 (120) | 9 (180) | 15 (300) | 20 (400) | 31 (620) | 48 (960) | 59 (1180) |
 
-- **The earlier estimate of 6–33 subjects is reproduced**, for m = 10 and ICC 0, 0.2 and 0.5: 6, 17, 33. **It is not an upper bound.** It stops at ICC 0.5 and assumes m = 10. Over the full ICC range 0 to 1 it becomes 6 to 59. No source gives the ICC of arm drops (ASSUMPTION).
-- **Is the design effect safe for a zero-drop test?** It is a variance correction, so we checked it exactly at P = 5 %, m = 10, against (a) a beta-binomial model [W75] and (b) the worst case over every possible mix of subject drop rates with that mean and ICC. The worst case (some subjects at one rate, the rest never dropping) is confirmed by a linear program (they agree within 1e-09):
+**Why 59 × one is robust to the ICC.** The m = 1 row is 59 at every ICC. With one fault trial per subject, subjects' drop probabilities may differ in any way: the chance that one subject does not drop is still one minus the mean drop probability. So zero drops in 59 subjects at a true 5 % has chance 4.85 % at every ICC in the table, under both the beta-binomial and the worst-case mix (computed: 0.04849 to 0.04849). No ICC has to be assumed, estimated or registered. The other rows show what the ICC would cost with more trials per subject.
 
-| ICC | Design effect | Subjects, design effect (plan) | Subjects, beta-binomial | Subjects, worst case | False-pass chance, plan size, worst case |
+- **The earlier estimate of 6–33 subjects is reproduced**, for m = 10 and ICC 0, 0.2 and 0.5: 6, 17, 33. **It is not an upper bound.** It stops at ICC 0.5 and assumes m = 10. Over the full ICC range 0 to 1 it becomes 6 to 59. No source gives the ICC of arm drops (ASSUMPTION).
+
+## 4b. Rejected alternatives
+
+**33 subjects × 10 fault trials (the earlier planning default, DE 5.5, 330 fault trials). Rejected by Charlie, 2026-11-26.** Reasons:
+1. **It is only valid if the drop ICC is at most 0.5, and that ICC must be fixed before trial 1.** A passing data set cannot tell you its ICC: with zero drops there is no variation to estimate it from. A pilot could measure the ICC of catch time. If catch times are normal (ASSUMPTION), a catch-time ICC of 0.25, 0.5, 0.75 or 0.9 gives a drop ICC of 0.08, 0.20, 0.41 or 0.62 at 5 %.
+2. **Above an ICC of 0.5104, its 330 trials are worth fewer than 59 independent ones, and the false-pass chance at a true 5 % goes over 5 %:**
+
+| True drop ICC | False pass, worst-case mix | False pass, beta-binomial | Chosen 59 × one |
+|---|---|---|---|
+| 0.5 | 3.69 % | 0.75 % | 4.85 % |
+| 0.6 | 6.24 % | 1.73 % | 4.85 % |
+| 0.8 | 12.21 % | 6.53 % | 4.85 % |
+| 1 | 18.40 % | 18.40 % | 4.85 % |
+
+3. **A high ICC is plausible here.** By the mapping in reason 1, a catch-time ICC of 0.75 to 0.9 already gives a drop ICC of 0.41 to 0.62.
+4. **Too small an ICC breaks it the other way.** Sizing for ICC 0 (6 subjects) when the truth is 0.5 gives a false-pass chance of 41.04 % (beta-binomial) to 54.87 % (worst case), not 5 %.
+5. Repeated faults teach the subject what is coming; the unprepared response is the hazard (section 3).
+
+For the record, the design-effect check for m = 10:
+
+**Is the design effect safe for a zero-drop test?** It is a variance correction, so we checked it exactly at P = 5 %, m = 10, against (a) a beta-binomial model [W75] and (b) the worst case over every possible mix of subject drop rates with that mean and ICC. The worst case (some subjects at one rate, the rest never dropping) is confirmed by a linear program (they agree within 1e-09):
+
+| ICC | Design effect | Subjects, design effect (rejected) | Subjects, beta-binomial | Subjects, worst case | False-pass chance, plan size, worst case |
 |---|---|---|---|---|---|
 | 0 | 1.00 | 6 | 6 | 6 | 4.61 % |
 | 0.05 | 1.45 | 9 | 8 | 8 | 2.76 % |
@@ -193,11 +231,8 @@ B-A15 is the project's human catch model: the user arrests the arm at exactly 20
 | 1 | 10.00 | 59 | 59 | 59 | 4.85 % |
 
 - The design effect is enough in every row. On a grid of ICC 0 to 1 in steps of one hundredth it stays enough for every m up to 46, and first falls short at the next m. **Do not use more than 46 trials per subject with this formula.**
-- **Too small an ICC breaks the test.** Sizing for ICC 0 (6 subjects) when the truth is 0.5 gives a false-pass chance of 41.04 % (beta-binomial) to 54.87 % (worst case), not 5 %.
-- **A passing data set cannot tell you its ICC:** with zero drops there is no variation to estimate it from. So the ICC must be fixed before trial 1. A pilot could measure the ICC of catch time. If catch times are normal (ASSUMPTION), a catch-time ICC of 0.25, 0.5, 0.75 or 0.9 gives a drop ICC of 0.08, 0.20, 0.41 or 0.62 at 5 %.
 
-**Planning default:** 33 subjects × 10 trials = 330 fault trials (DE 5.5). The 10 trials come from Rev U row 14 and the ICC of 0.5 is the top of the earlier range; both are ASSUMPTIONS.
-**Recommended alternative for Charlie:** 59 subjects × one trial. It needs no ICC assumption, has the fewest fault trials (59) and tests the unprepared first response. It needs more people and does not meet Rev U's ten-trials-per-subject floor.
+**The other trial counts per subject** in the table above carry the same ICC dependence and are rejected for the same reasons.
 
 ## 5. Pass, fail and stop rules
 
@@ -212,23 +247,21 @@ B-A15 is the project's human catch model: the user arrests the arm at exactly 20
 5. **Where the drop falls** (from t_c; SYNTHETIC edges; decides who is told what, not a pass): above 201.90 and up to 203.72 ms, (b) has failed and (iv) becomes the candidate. (iv) needs Charlie's switch decision and its own new full test in its own cell. Above 203.72 ms both fail: escalate to Charlie (via Seren).
 6. **Retest** only after a documented design change, from zero. Trying again without a change until it passes gives a false-pass chance of 9.46 % over two tries and 13.85 % over three.
 
-**Allowed-drop plans** (must replace the zero-drop plan before trial 1, never after a drop). m = 10, subjects by design effect:
+**Allowed-drop plans** (must replace the zero-drop plan before trial 1, never after a drop). With one trial per subject, subjects = trials at any ICC:
 
-| Allowed drops c | n (independent) | Size at 5 % | Subjects, ICC 0 | Subjects, ICC 0.05 | Subjects, ICC 0.1 | Subjects, ICC 0.2 | Subjects, ICC 0.3 | Subjects, ICC 0.5 | Subjects, ICC 0.8 | Subjects, ICC 1 |
-|---|---|---|---|---|---|---|---|---|---|---|
-| 0 | 59 | 4.849 % | 6 | 9 | 12 | 17 | 22 | 33 | 49 | 59 |
-| 1 | 93 | 4.998 % | 10 | 14 | 18 | 27 | 35 | 52 | 77 | 93 |
-| 2 | 124 | 4.953 % | 13 | 18 | 24 | 35 | 46 | 69 | 102 | 124 |
+| Allowed drops c | n (independent) | Size at 5 % | Subjects (one trial each) |
+|---|---|---|---|
+| 0 | 59 | 4.849 % | 59 |
+| 1 | 93 | 4.998 % | 93 |
+| 2 | 124 | 4.953 % | 124 |
 
-The design effect also covers the beta-binomial and the never/sometimes-drop mix for c = 1 and 2 at every ICC in the table (rows where it falls short: 0). For c above 0 that mix is not proven to be the worst case.
+**Registered extension that keeps the first look at 59** (also before trial 1 only). The overall false-pass chance is 0.0499997; with one trial per subject it does not depend on the ICC. It is costly because the first look already spends 0.0485:
 
-**Registered extension that keeps the first look at 59** (also before trial 1 only). The overall false-pass chance is 0.0499997 for independent trials, and at most 0.0485 with the subject counts below under either clustered model (m = 10). It is costly because the first look already spends 0.0485:
-
-| Look | Pass if total drops at most | Total trials (independent) | Subjects, ICC 0 | Subjects, ICC 0.05 | Subjects, ICC 0.1 | Subjects, ICC 0.2 | Subjects, ICC 0.3 | Subjects, ICC 0.5 | Subjects, ICC 0.8 | Subjects, ICC 1 |
-|---|---|---|---|---|---|---|---|---|---|---|
-| 1 | 0 | 59 | 6 | 9 | 12 | 17 | 22 | 33 | 49 | 59 |
-| 2 | 1 | 149 | 15 | 22 | 29 | 42 | 56 | 82 | 123 | 149 |
-| 3 | 2 | 273 | 28 | 40 | 52 | 77 | 102 | 151 | 224 | 273 |
+| Look | Pass if total drops at most | Total subjects (one trial each) |
+|---|---|---|
+| 1 | 0 | 59 |
+| 2 | 1 | 149 |
+| 3 | 2 | 273 |
 
 **Default: zero drops, no extension.** A registered extension also means more exposure after a known drop, so it needs explicit IRB approval.
 
@@ -238,23 +271,27 @@ The design effect also covers the beta-binomial and the never/sometimes-drop mix
 |---|---|
 | Passive stop touched, pain, injury, or any adverse event | Stop the study. IRB report. Scored DROP if the stop was touched |
 | Torque trip, ramp or STO outside the cell, lost sensor or clock | Stop the session, fix and re-prove on the dummy. Trial INVALID; drop rule still applies |
+| Subject presses the stop button | Rig power is cut. Stop that subject; the trial is INVALID and the drop rule still applies |
 | Subject asks to stop | Stop that subject. Keep and report their valid trials. Recruit a replacement to reach the planned size |
 | Dummy check at start or end of a day outside tolerance | Stop. That day's trials go to FC before they count |
 | All planned trials done with no drop | Stop. PASS. No further trials |
 
 ## 6. Feasibility before testing (SYNTHETIC)
 
-**In plain words: if the true drop probability is 20 %–33 %, the chance of passing is effectively zero.** At most 2.4e-05, about one in 41,267 (SYNTHETIC), over every m, ICC and allowed-drop option in the tables, and the registered extension.
+**In plain words: if the true drop probability is 20 %–33 %, the chance of passing is effectively zero (SYNTHETIC).**
+- **Chosen design (59 × one):** 1.9e-06 at 20 % and 5.5e-11 at 33 % (SYNTHETIC), at any ICC.
+- **Every option in this plan's tables** (trials per subject, ICC, allowed drops and the registered extension): at most 2.4e-05, about one in 41,267 (SYNTHETIC). This bound holds **only for the tabulated options**.
+- **Any trial count per subject up to 46** (where the design-effect check holds), any ICC in steps of 1/2000, zero drops, best-case mix: at most 2.1e-03 at 20 % and 5.7e-04 at 33 %, both at m = 46, ICC 0.012, 2 subjects (SYNTHETIC). All of those options are rejected (section 4b).
 
-Independent trials:
+Chosen design and the allowed-drop sizes (independent trials, one per subject):
 
-| SYNTHETIC true drop probability | c = 0, n = 59 | c = 1, n = 93 | c = 2, n = 124 | Mean trials to first drop | Drop within one subject's 10 trials, ICC 0 / 0.5 |
-|---|---|---|---|---|---|
-| 20 % (FC low) | 1.9e-06 | 2.4e-08 | 4.9e-10 | 5.0 | 89.3 % / 46.2 % |
-| 33 % (FC high) | 5.5e-11 | 3.1e-15 | 5.2e-19 | 3.0 | 98.2 % / 65.7 % |
-| 48 % (window (b) edge) | 1.8e-17 | 3.6e-25 | 4.5e-32 | 2.1 | 99.9 % / 80.8 % |
+| SYNTHETIC true drop probability | c = 0, n = 59 (chosen) | c = 1, n = 93 | c = 2, n = 124 | Mean subjects to first drop |
+|---|---|---|---|---|
+| 20 % (FC low) | 1.9e-06 | 2.4e-08 | 4.9e-10 | 5.0 |
+| 33 % (FC high) | 5.5e-11 | 3.1e-15 | 5.2e-19 | 3.0 |
+| 48 % (window (b) edge) | 1.8e-17 | 3.6e-25 | 4.5e-32 | 2.1 |
 
-With subjects inflated for the ICC (m = 10). "Best case" is the mix of subjects most favourable to passing:
+Rejected clustered designs, subjects inflated for the ICC (m = 10). "Best case" is the mix of subjects most favourable to passing:
 
 | SYNTHETIC: ICC | Subjects (trials) | 20 %: beta-binomial / best case | 33 %: beta-binomial / best case | 48 %: beta-binomial / best case |
 |---|---|---|---|---|
@@ -267,8 +304,8 @@ With subjects inflated for the ICC (m = 10). "Best case" is the mix of subjects 
 | 0.8 | 49 (490) | 3.6e-08 / 1.6e-06 | 9.9e-14 / 6.2e-11 | 3.4e-21 / 4.9e-17 |
 | 1 | 59 (590) | 1.9e-06 / 1.9e-06 | 5.5e-11 / 5.5e-11 | 1.8e-17 / 1.8e-17 |
 
-- **More subjects do not help.** No row gives any real chance of passing. Under-sizing raises the chance only by breaking the plan: sized for ICC 0 with a true ICC of 0.5, a design that drops 20 % of the time would pass with chance 2.42 % (SYNTHETIC).
-- **The first drop is expected almost at once:** on average at trial 3.0 to 5.0 (SYNTHETIC, independent). At ICC 0.5, the chance of a drop within the first two subjects is 71.09 % to 88.23 %.
+- **More subjects do not help.** No row gives any real chance of passing. Under-sizing raises the chance only by breaking the plan: sized for ICC 0 with a true ICC of 0.5, a design that drops 20 % of the time would pass with chance 2.42 % under the beta-binomial and 8.78 % under the best-case mix (SYNTHETIC).
+- **The first drop is expected almost at once:** on average at subject 3.0 to 5.0 (SYNTHETIC).
 - **FC's 20 %–33 % is for the nominal hold, not this window.** We reproduce it: 19.86 %–32.57 % at mean 201.1 ms, SD 16 ms (SYNTHETIC; a linear extrapolation of [PRU09] outside its data). With the **relaxed** window Charlie chose and the same catch times it is 43.47 % at the (iv) edge and 47.95 % at the (b) edge (SYNTHETIC). Extending the trend to zero hold (mean 204.5 ms) gives 51.95 % and 56.44 % (SYNTHETIC). So FC's range is the optimistic case here.
 - **No [PRU09] condition passes either.** Reading ± as SD and times as normal (ASSUMPTIONS), the best is 7.35 % drops and a 1.11 % chance of passing (SYNTHETIC):
 
@@ -321,8 +358,8 @@ All rig channels are logged at 15 kHz or faster (the budget in section 3; one sa
 | A2 | The 200 ms catch. No human data |
 | A3 | Drop model: instant catch, zero elbow damping, HE's arm and device parameters, k = 1.5862 |
 | A4 | Zero hold torque represents a relaxed user, and one window fits every subject (Charlie 1a) |
-| A5 | ICC of drops (0.5 for planning) and that it is the same for all subjects |
-| A6 | 10 fault trials per subject (Rev U row 14) |
+| A5 | ICC of drops: not needed by the chosen design; used only to compare designs (0.5 was the rejected default) |
+| A6 | Not an assumption: one fault trial per subject is Charlie's decision (2026-11-26). It is below the Rev U row 14 floor of 10 trials per subject (open item) |
 | A7 | Subjects are independent and represent the users; subject population not set |
 | A8 | Testing only the governing cell is enough; catch time does not depend on the path |
 | A9 | Score combines catch time and angle, with uncertainty added against a pass |
@@ -336,15 +373,18 @@ All rig channels are logged at 15 kHz or faster (the budget in section 3; one sa
 | A17 | Dummy trial SD 0.15 ms, wanted precision 0.1 ms, 1 min per reset |
 | A18 | Rig: stop at 15° with a 10° stroke, upper stop at +15°, contact radius 0.20 m, clearance 25 mm, absorber peak 1.5 × the ideal force, torque trip 10 % over k·T0, device-at-cap runaway case (HE) |
 | A19 | **Firmware test mode** that sets ramp 21.00 N·m/s and STO 148 ms without changing the fault path. Open risk: **must be verified** |
+| A20 | Encoder bandwidth from the first-order rise-time rule, bandwidth = 0.35 / rise time, with the encoder-latency share as the rise time (HE's method) |
 
 ## 9. Open items
 
-1. Charlie: run Phase B at all, given section 6?
-2. Charlie: 33 × 10 or 59 × one? ICC value? Which paths need their own sample?
-3. FC / Charlie: confirm the combined score (A9).
-4. HE: allowed ramp and STO overshoot on the rig; latch design; absorber proof on the dummy; Rev U row 14 still says the window is recomputed per hold torque.
-5. HE / firmware: **the test mode (A19) must be verified**: ramp 21.00 N·m/s and STO 148 ms delivered as set, fault path unchanged.
-6. IRB: criteria, consent, adverse events, rest times, sham ratio.
+1. **OPEN SAFETY ITEM, BLOCKS PHASE B:** a sourced human tolerance limit for stop contact (section 2), and proof on the dummy that the stop stays within it.
+2. Charlie: run Phase B at all, given section 6?
+3. Charlie: which paths need their own sample? (Design decided: 59 × one, 2026-11-26.)
+4. FC / Charlie: confirm the combined score (A9).
+5. HE: allowed ramp and STO overshoot on the rig; latch design and whether the release skew can be met; absorber proof on the dummy; bandwidth for the torque and force channels. Rev U row 14 still says the window is recomputed per hold torque and asks for 10 trials per subject; both differ from Charlie's decisions.
+6. HE / firmware: **the test mode (A19) must be verified**: ramp 21.00 N·m/s and STO 148 ms delivered as set, fault path unchanged.
+7. Before Phase B: name the stop holder (IRB protocol) and fit the subject stop button.
+8. IRB: criteria, consent, adverse events, rest times, sham ratio.
 
 ## References
 

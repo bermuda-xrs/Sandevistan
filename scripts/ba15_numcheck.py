@@ -55,6 +55,7 @@ T_CAP_DEV = 7.898894154818326  # device chain cap, N*m (exo/benchC_rules_out.jso
 BUDGET_FRAC = 0.10  # total timing uncertainty <= 1/10 of the smallest margin (Rev U row-8 rule, reused)
 ALLOC = dict(sample=0.40, trigger=0.10, release=0.20, angle=0.10, enc_lat=0.10, spare=0.10)
 FS_STEP_KHZ = 5  # sampling rate rounded up to this step
+RISE_K = 0.35  # first-order rise-time rule t_r * f_3dB (ASSUMPTION, HE's method)
 INPUT_SHARE = 0.25  # each of 4 model inputs (net torque, J, G, k) may use this share of TOL_MODEL_MS
 HOLD_FRACS = (0.0, 0.5, 1.0)  # dummy hold torque as a fraction of G - k*T0 (0 = relaxed)
 # Dummy trial SD (ms), wanted precision of the mean (ms), Rev U row 14 floor of drops per cell, reset (min)
@@ -75,7 +76,12 @@ FC_P = (0.20, 0.33)  # Fact Checker, S7_verdict.md row 12
 REF = dict(window=(201.90484840282784, 203.7164677450151), n_allow=(59, 93, 124), subjects=(6, 17, 33),
            fc_p=(0.19864655721181523, 0.3257000686903164), h0_p_worst=0.4795370246007952)
 
-M_PLAN, ICC_PLAN = 10, Fr("0.5")  # ASSUMPTIONS (RevU row 14; upper end of the earlier 6-33 range)
+M_CHOSEN = 1  # Charlie's decision 2026-11-26 01:25 KST: 59 subjects x 1 fault trial
+# rejected alternative 33 x 10 (Rev U row 14 floor; top of the earlier 6-33 range)
+M_ALT, ICC_ALT = 10, Fr("0.5")
+# true ICCs at which the rejected design is checked
+ALT_TRUE_ICCS = [Fr(s) for s in ("0.5", "0.6", "0.8", "1")]
+SUP_ICC_STEPS, SUP_M_MAX = 2000, 46  # continuous-ICC sweep for the bound over every allowed m
 ICCS = [Fr(s) for s in ("0", "0.05", "0.1", "0.2", "0.3", "0.5", "0.8", "1")]
 MS = (1, 2, 5, 10, 20)
 P_ROWS = (0.001, 0.01, 0.02, 0.05)
@@ -239,6 +245,7 @@ def hardware(grid, mod) -> dict:
                ang_time_ms=ang_t, w10_min=w10_min, w200_max=w200_max)
     bud["u_t_ms"] = bud["period_ms"] + bud["trigger_ms"] + bud["release_ms"] + bud["enc_lat_ms"] + ang_t
     bud["headroom_ms"] = B - bud["u_t_ms"]
+    bud["bw_enc_khz"] = RISE_K / bud["enc_lat_ms"]  # first-order rise time t_r = 0.35 / f (ASSUMPTION, HE)
     bud["ok"] = bool(bud["u_t_ms"] <= B)
     bud["ang_unc_deg"] = enc_res + w200_max * (bud["u_t_ms"] - ang_t) / 1e3
     bud["t10_min_pass_ms"] = CATCH_MS + bud["u_t_ms"]
@@ -252,6 +259,16 @@ def hardware(grid, mod) -> dict:
                drops=n_cell * len(grid), hours=n_cell * len(grid) * T_RESET_MIN / 60,
                holds=[hf * A["hold_nom"] for hf in HOLD_FRACS], n_b=sum(k[0] == "b" for k in grid) // 3,
                n_iv=sum(k[0] == "iv" for k in grid) // 3)
+    settings = {}
+    for (o, p, r, sto, hf) in grid:
+        settings.setdefault((p, round(r, 9), sto, hf), []).append(o)
+    mat["distinct"] = len(settings)
+    mat["dup_cells"] = len(grid) - len(settings)
+    mat["dup_types"] = mat["dup_cells"] // len(HOLD_FRACS)
+    mat["dup_drops"] = mat["dup_cells"] * n_cell
+    mat["dup_hours"] = mat["dup_drops"] * T_RESET_MIN / 60
+    mat["distinct_drops"] = len(settings) * n_cell
+    mat["distinct_hours"] = mat["distinct_drops"] * T_RESET_MIN / 60
     up = grid[("iv", "comm", RATE["iv"]["comm"] * (1 + TOL), STO["comm"][0], 0.0)]
     mat["upper_edge_t10"] = up["t10"]
     mat["rows"] = [dict(cell=f"{'(b)' if o == 'b' else '(iv)'} {p} {r:.2f} N·m/s, STO "
@@ -284,7 +301,12 @@ def hardware(grid, mod) -> dict:
     rig["ang_bottom"] = 90 - STOP_DEG - RIG["th_stroke"]
     rig["ang_top"] = 90 + RIG["th_up"] + RIG["th_stroke"]
     rig["sweep_mm"] = rig["r_tip"] * math.radians(rig["ang_top"] - rig["ang_bottom"]) * 1e3
-    rig["stop_gap_ms"] = t_stop_min - min(v["t10"] for v in grid.values())
+    first15 = min(grid, key=lambda c: grid[c]["t_stop"])
+    gov = grid[("b",) + tuple(mod["gov_key"]) + (0.0,)]
+    rig["first15_cell"] = "|".join(map(str, first15))
+    rig["gap_first15_ms"] = grid[first15]["t_stop"] - grid[first15]["t10"]  # same cell
+    rig["gap_gov_ms"] = gov["t_stop"] - gov["t10"]
+    rig["t_stop_gov"], rig["w_stop_gov"] = gov["t_stop"], gov["w_stop"]
     rig.update(t_stop_min=t_stop_min, w_stop_max=w_stop_max)
     # flip values at the governing cell (hold 0): the parameter change that takes the drop at the
     # 200 ms catch to exactly 10 deg, i.e. where the model would pass a unit that really fails
@@ -459,37 +481,45 @@ def stats() -> dict:
     out["grid"] = grid
     out["range_he"] = [grid[f"10|{v:g}"]["subjects"] for v in (0, 0.2, 0.5)]
     out["worst_lp_gap"] = max(abs(worst_zero(P0, r, m) - pmf_two(P0, r, m, 0)[0])
-                              for m in (2, M_PLAN) for r in ICCS)
+                              for m in (2, M_ALT) for r in ICCS)
     fine = [Fr(i, 100) for i in range(101)]
 
     def covered(m):
         return all(p_total_le(pmf_two(P0, r, m, 0), subjects(N0, m, r), 0) <= alpha for r in fine)
 
     out["deff_ok_to_m"] = next(m for m in range(1, 200) if not covered(m + 1))
-    out["allowed"] = {f"{c}|{float(r):g}": dict(deff=subjects(nc[c], M_PLAN, r),
-                                                bb=subjects_model(pmf_bb, c, M_PLAN, r),
-                                                two=subjects_model(pmf_two, c, M_PLAN, r))
+    out["allowed"] = {f"{c}|{float(r):g}": dict(deff=subjects(nc[c], M_ALT, r),
+                                                bb=subjects_model(pmf_bb, c, M_ALT, r),
+                                                two=subjects_model(pmf_two, c, M_ALT, r))
                       for c in (0, 1, 2) for r in ICCS}
     out["allowed_short"] = [k for k, v in out["allowed"].items() if v["deff"] < max(v["bb"], v["two"])]
-    out["ext_subjects"] = {f"{float(r):g}": [subjects(n, M_PLAN, r) for n in ext] for r in ICCS}
+    out["ext_subjects"] = {f"{float(r):g}": [subjects(n, M_ALT, r) for n in ext] for r in ICCS}
     out["ext_clustered_max"] = max(
-        staged_pass_subjects(out["ext_subjects"][f"{float(r):g}"], f(P0, r, M_PLAN, 2))
+        staged_pass_subjects(out["ext_subjects"][f"{float(r):g}"], f(P0, r, M_ALT, 2))
         for r in ICCS for f in (pmf_bb, pmf_two))
     out["latent_icc"] = [0.25, 0.5, 0.75, 0.9]
     out["latent"] = [icc_binary(r) for r in out["latent_icc"]]
     out["range_icc"] = [0.0, 0.2, 0.5]
-    k = subjects(N0, M_PLAN, ICC_PLAN)
-    # plan sized for ICC 0 when the true ICC is ICC_PLAN: false-pass chance at p = P0
-    k0 = subjects(N0, M_PLAN, Fr(0))
-    out["misspec"] = [p_total_le(f(P0, ICC_PLAN, M_PLAN, 0), k0, 0) for f in (pmf_bb, pmf_two)]
-    out["plan"] = dict(m=M_PLAN, icc=float(ICC_PLAN), subjects=k, trials=k * M_PLAN,
-                       deff=float(deff(M_PLAN, ICC_PLAN)), subjects_any=subjects(N0, M_PLAN, Fr(1)),
-                       trials_any=subjects(N0, M_PLAN, Fr(1)) * M_PLAN)
+    k = subjects(N0, M_ALT, ICC_ALT)
+    # plan sized for ICC 0 when the true ICC is ICC_ALT: false-pass chance at p = P0
+    k0 = subjects(N0, M_ALT, Fr(0))
+    out["misspec"] = [p_total_le(f(P0, ICC_ALT, M_ALT, 0), k0, 0) for f in (pmf_bb, pmf_two)]
+    out["chosen"] = dict(m=M_CHOSEN, subjects=subjects(N0, M_CHOSEN, Fr(0)),
+                         false_pass=[p_total_le(f(P0, r, M_CHOSEN, 0), N0, 0)
+                                     for r in ICCS for f in (pmf_bb, pmf_two)])
+    out["chosen"]["false_pass_max"] = max(out["chosen"]["false_pass"])
+    out["chosen"]["false_pass_min"] = min(out["chosen"]["false_pass"])
+    out["alt_icc_break"] = float((Fr(k * M_ALT, N0) - 1) / (M_ALT - 1))  # n_eff < N0 above this ICC
+    out["alt_risk"] = [dict(icc=float(r), worst=p_total_le(pmf_two(P0, r, M_ALT, 0), k, 0),
+                            bb=p_total_le(pmf_bb(P0, r, M_ALT, 0), k, 0)) for r in ALT_TRUE_ICCS]
+    out["plan"] = dict(m=M_ALT, icc=float(ICC_ALT), subjects=k, trials=k * M_ALT,
+                       deff=float(deff(M_ALT, ICC_ALT)), subjects_any=subjects(N0, M_ALT, Fr(1)),
+                       trials_any=subjects(N0, M_ALT, Fr(1)) * M_ALT)
     return out
 
 
 # ---------------------------------------------------------------- feasibility (SYNTHETIC)
-def feasibility(mod) -> dict:
+def feasibility(mod, hw) -> dict:
     ps = {"FC low": FC_P[0], "FC high": FC_P[1], "window (b) edge": mod["p_lo_same_mean"]}
     nc = [n_allowed(c) for c in range(3)]
     out = {"ps": ps, "indep": {k: [float(binom.cdf(c, n, p)) for c, n in enumerate(nc)]
@@ -497,10 +527,10 @@ def feasibility(mod) -> dict:
     out["clustered"] = {}
     for k, p in ps.items():
         for r in ICCS:
-            n_s = subjects(N0, M_PLAN, r)
+            n_s = subjects(N0, M_ALT, r)
             out["clustered"][f"{k}|{float(r):g}"] = dict(
-                subjects=n_s, bb=p_total_le(pmf_bb(p, r, M_PLAN, 0), n_s, 0),
-                two=p_total_le(pmf_two(p, r, M_PLAN, 0), n_s, 0))
+                subjects=n_s, bb=p_total_le(pmf_bb(p, r, M_ALT, 0), n_s, 0),
+                two=p_total_le(pmf_two(p, r, M_ALT, 0), n_s, 0))
     # largest chance of passing over every option offered, for FC's range
     best = []
     for p in FC_P:
@@ -512,11 +542,36 @@ def feasibility(mod) -> dict:
                     best += [p_total_le(f(p, r, m, c), subjects(n, m, r), c) for c, n in enumerate(nc)]
                     best.append(staged_pass_subjects(ext, f(p, r, m, 2)))
     out["max_pass"], out["one_in"] = max(best), 1 / max(best)
+    # same bound over every m the plan's design-effect check allows (1..46) and a fine ICC sweep, c = 0
+    sup = {}
+    for p in FC_P:
+        top = (0.0, None)
+        for m in range(1, SUP_M_MAX + 1):
+            for i in range(SUP_ICC_STEPS + 1):
+                r = Fr(i, SUP_ICC_STEPS)
+                k = subjects(N0, m, r)
+                v = p_total_le(pmf_two(p, r, m, 0), k, 0)
+                if v > top[0]:
+                    top = (v, dict(m=m, icc=float(r), subjects=k))
+        sup["lo" if p == FC_P[0] else "hi"] = dict(P=top[0], **top[1])
+    out["sup_any_m"] = sup
+    out["chosen_pass"] = {k: (1 - p) ** N0 for k, p in ps.items()}
+    # stop contact in Phase B: catch later than the 15 deg stop (no-catch arm reaches it), S7 catch model
+    sd, means = mod["fc_sd"], {"nominal hold": mod["fc_mean"], "zero hold": mod["mean_h0"]}
+    rg = hw["rig"]
+    out["contact"] = {}
+    for lab, mu in means.items():
+        pc_gov = float(norm.sf(rg["t_stop_gov"], mu, sd))
+        pc_first = float(norm.sf(rg["t_stop_min"], mu, sd))
+        pd = float(norm.sf(mod["lo"], mu, sd))  # any DROP (catch after the (b) edge) halts the study
+        out["contact"][lab] = dict(mean=mu, p_contact_gov=pc_gov, p_contact_first15=pc_first, p_drop=pd,
+                                   p_study_contact=pc_gov / pd * (1 - (1 - pd) ** N0))
     out["first_drop"] = {k: 1 / p for k, p in ps.items()}
     out["drop_in_10"] = {k: 1 - (1 - p) ** 10 for k, p in ps.items()}
-    out["drop_in_10_icc"] = {k: 1 - float(pmf_bb(p, ICC_PLAN, 10, 0)[0]) for k, p in ps.items()}
+    out["drop_in_10_icc"] = {k: 1 - float(pmf_bb(p, ICC_ALT, 10, 0)[0]) for k, p in ps.items()}
     out["drop_in_2_subj"] = {k: 1 - (1 - v) ** 2 for k, v in out["drop_in_10_icc"].items()}
-    out["undersized"] = p_total_le(pmf_bb(FC_P[0], ICC_PLAN, M_PLAN, 0), subjects(N0, M_PLAN, Fr(0)), 0)
+    out["undersized"] = p_total_le(pmf_bb(FC_P[0], ICC_ALT, M_ALT, 0), subjects(N0, M_ALT, Fr(0)), 0)
+    out["undersized_best"] = p_total_le(pmf_two(FC_P[0], ICC_ALT, M_ALT, 0), subjects(N0, M_ALT, Fr(0)), 0)
     return out
 
 
@@ -535,12 +590,14 @@ def compute() -> dict:
     grid = build_grid()
     mod, st = model(grid), stats()
     hw = hardware(grid, mod)
-    feas = feasibility(mod)
+    feas = feasibility(mod, hw)
     inp = dict(win_lo=WINDOW_MS[0], win_hi=WINDOW_MS[1], p0=P0, conf=CONF, n0=N0, drop=DROP_LIM,
                catch=CATCH_MS, stop=STOP_DEG, res=RES_MS, rate=RATE["b"]["estop"] * (1 + TOL),
                rate_iv=RATE["iv"]["estop"] * (1 + TOL), sto=STO["estop"][0], sto_comm=STO["comm"][0],
                tol_model=TOL_MODEL_MS, emg_hz=EMG_HZ, imu_hz=IMU_HZ, imu_ms=1e3 / IMU_HZ,
-               daq_khz=1 / RES_MS, lp_tol=LP_TOL, m=M_PLAN, icc=float(ICC_PLAN), k=K_HI, T0=T0_DEV, tol=TOL,
+               daq_khz=1 / RES_MS, lp_tol=LP_TOL, m_alt=M_ALT, icc_alt=float(ICC_ALT), m_chosen=M_CHOSEN,
+               rate_dup=RATE["iv"]["estop"], sup_steps=SUP_ICC_STEPS, rise_k=RISE_K,
+               k=K_HI, T0=T0_DEV, tol=TOL,
                g_unc=G_UNC, fc_lo=FC_P[0], fc_hi=FC_P[1], pru_sd=mod["fc_sd"],
                rate_nom=RATE["b"]["estop"], sto_nom=STO["estop"][1], budget_pct=BUDGET_FRAC,
                step_khz=FS_STEP_KHZ,
@@ -565,32 +622,31 @@ def tables(R) -> dict:
                      "|---" * (len(rs) + 1) + "|"]
     t["subjects"] += [f"| {m} | " + " | ".join(
         f"{g[f'{m}|{r}']['subjects']} ({g[f'{m}|{r}']['trials']})" for r in rs) + " |" for m in MS]
-    t["check"] = ["| ICC | Design effect | Subjects, design effect (plan) | Subjects, beta-binomial "
+    t["check"] = ["| ICC | Design effect | Subjects, design effect (rejected) | Subjects, beta-binomial "
                   "| Subjects, worst case | False-pass chance, plan size, worst case |", "|---" * 6 + "|"]
     t["check"] += [f"| {r} | {v['deff']:.2f} | {v['subjects']} | {v['bb']} | {v['worst']} | "
-                   f"{_pct(v['false_pass_worst'])} |" for r in rs for v in [g[f"{M_PLAN}|{r}"]]]
-    t["allowed"] = ["| Allowed drops c | n (independent) | Size at 5 % | "
-                    + " | ".join(f"Subjects, ICC {r}" for r in rs) + " |", "|---" * (len(rs) + 3) + "|"]
-    t["allowed"] += [f"| {c} | {st[f'n{c}']} | {100 * st['size'][c]:.3f} % | "
-                     + " | ".join(str(al[f"{c}|{r}"]["deff"]) for r in rs) + " |" for c in (0, 1, 2)]
-    t["ext"] = ["| Look | Pass if total drops at most | Total trials (independent) | "
-                + " | ".join(f"Subjects, ICC {r}" for r in rs) + " |", "|---" * (len(rs) + 3) + "|"]
-    t["ext"] += [f"| {i + 1} | {i} | {n} | "
-                 + " | ".join(str(st["ext_subjects"][r][i]) for r in rs) + " |"
-                 for i, n in enumerate(st["ext"])]
+                   f"{_pct(v['false_pass_worst'])} |" for r in rs for v in [g[f"{M_ALT}|{r}"]]]
+    t["allowed"] = ["| Allowed drops c | n (independent) | Size at 5 % | Subjects (one trial each) |",
+                    "|---" * 4 + "|"]
+    t["allowed"] += [f"| {c} | {st[f'n{c}']} | {100 * st['size'][c]:.3f} % | {st[f'n{c}']} |"
+                     for c in (0, 1, 2)]
+    t["ext"] = ["| Look | Pass if total drops at most | Total subjects (one trial each) |", "|---" * 3 + "|"]
+    t["ext"] += [f"| {i + 1} | {i} | {n} |" for i, n in enumerate(st["ext"])]
+    t["alt_risk"] = ["| True drop ICC | False pass, worst-case mix | False pass, beta-binomial "
+                     f"| Chosen {N0} × one |", "|---" * 4 + "|"]
+    t["alt_risk"] += [f"| {r['icc']:g} | {_pct(r['worst'])} | {_pct(r['bb'])} | "
+                      f"{_pct(st['chosen']['false_pass_max'])} |" for r in st["alt_risk"]]
     t["oc"] = ["| True drop probability | Pass, c = 0 (n = %d) | Pass, c = 1 (n = %d) "
                "| Pass, c = 2 (n = %d) |" % (st["n0"], st["n1"], st["n2"]), "|---" * 4 + "|"]
     t["oc"] += [f"| {100 * r['p']:g} % | " + " | ".join(_pct(x) for x in r["P"]) + " |" for r in st["oc"]]
-    t["feas"] = ["| SYNTHETIC true drop probability | c = 0, n = %d | c = 1, n = %d | c = 2, n = %d "
-                 "| Mean trials to first drop | Drop within one subject's 10 trials, ICC 0 / %g |"
-                 % (st["n0"], st["n1"], st["n2"], st["plan"]["icc"]), "|---" * 6 + "|"]
+    t["feas"] = ["| SYNTHETIC true drop probability | c = 0, n = %d (chosen) | c = 1, n = %d | c = 2, n = %d "
+                 "| Mean subjects to first drop |" % (st["n0"], st["n1"], st["n2"]), "|---" * 5 + "|"]
     t["feas"] += [f"| {100 * p:.0f} % ({k}) | " + " | ".join(f"{x:.1e}" for x in f["indep"][k])
-                  + f" | {f['first_drop'][k]:.1f} | {100 * f['drop_in_10'][k]:.1f} % / "
-                  f"{100 * f['drop_in_10_icc'][k]:.1f} % |" for k, p in f["ps"].items()]
+                  + f" | {f['first_drop'][k]:.1f} |" for k, p in f["ps"].items()]
     t["feas_icc"] = ["| SYNTHETIC: ICC | Subjects (trials) | " + " | ".join(
         f"{100 * p:.0f} %: beta-binomial / best case" for p in f["ps"].values()) + " |",
         "|---" * (2 + len(f["ps"])) + "|"]
-    t["feas_icc"] += [f"| {r} | {v0['subjects']} ({v0['subjects'] * M_PLAN}) | " + " | ".join(
+    t["feas_icc"] += [f"| {r} | {v0['subjects']} ({v0['subjects'] * M_ALT}) | " + " | ".join(
         f"{f['clustered'][f'{k}|{r}']['bb']:.1e} / {f['clustered'][f'{k}|{r}']['two']:.1e}"
         for k in f["ps"]) + " |" for r in rs for v0 in [f["clustered"][f"FC low|{r}"]]]
     hw, ni = R["syn"]["hw"], R["in"]
@@ -610,6 +666,8 @@ def tables(R) -> dict:
         ("Trigger skew", f"at most {b['trigger_ms']:.3f} ms", pc(al["trigger"])),
         ("Release skew", f"at most {b['release_ms']:.3f} ms", pc(al["release"])),
         ("Encoder latency", f"at most {b['enc_lat_ms']:.3f} ms", pc(al["enc_lat"])),
+        ("Encoder bandwidth", f"at least {b['bw_enc_khz']:.1f} kHz",
+         f"{ni['rise_k']:g} / encoder latency (first-order rise time, ASSUMPTION)"),
         ("Angle resolution", f"at most {b['ang_max_deg']:.4f}° ({b['bits']}-bit: {b['counts']:,} counts, "
          f"{b['enc_res_deg']:.5f}°)", f"{pc(al['angle'])} at the slowest {b['w10_min']:.1f} °/s crossing; "
          f"{b['ang_time_ms']:.4f} ms"),
@@ -660,7 +718,10 @@ LITERALS = {"1": "counts, list items, N·m background load (PRU09)", "2": "count
             "0": "zero drops, c = 0", "4": "PRU09 foreperiod upper limit, s", "5": "section number",
             "6": "section number", "7": "section number", "8": "section number", "9": "section number",
             "14": "row number (Rev U, S7 verdict)",
-            "23": "Declaration of Helsinki paragraph", "90": "elbow start angle, deg"}
+            "23": "Declaration of Helsinki paragraph", "2026-11-26": "date of Charlie's design decision",
+            "01": "time of Charlie's decision (01:25 KST)", "25": "time of Charlie's decision (01:25 KST)",
+            "15066": "standard number, ISO/TS 15066", "12": "row number in FC's PR9_verdict.md",
+            "90": "elbow start angle, deg"}
 SYN_KEYS = ("syn.", "in.win_", "in.fc_", "ref.lo_", "ref.hi_")
 PLACEHOLDER = re.compile(r"\{\{([^{}|]+)(?:\|([^{}]*))?\}\}")
 
