@@ -264,3 +264,99 @@ def test_r2_committed_values():
     assert r2["jp_peak_err"]["max"] < 2 * adr.Q_REQ and r2["jp_peak_err"]["min"] > -2 * adr.Q_REQ
     assert r2["faults"]["pivot_stuck_onset"]["missed_base"]["p"] > 0.9
     assert r2["pr9_head"].startswith("335d4e5")
+
+
+# ---------------------------------------------------------------- fix round 3
+
+
+def test_r3_one_channel_grid_matches_exact_sup():
+    r = adr.exact_worst(1.0, pivot=False, nph=401, nm=128)
+    assert 0.14 < r["t10_err_max_ms"] <= 0.14467 + 1e-4
+    assert r["d200_err_min_deg"] == pytest.approx(-0.02355480210437655, abs=1e-6)
+
+
+@pytest.mark.parametrize("k", [0.9, 1.3, 1.5862])
+def test_r3_two_channel_d200_is_lattice_set_and_independent_of_k(k):
+    r = adr.exact_worst(k, nph=201, nm=48)
+    assert r["d200_err_min_deg"] == pytest.approx(-0.02630138413562655, abs=1e-6)
+    assert not r["d200_ok"]
+
+
+def test_r3_crossing_is_below_lattice_bound_and_above_one_channel():
+    lb = adr.lattice_bound()
+    assert lb == pytest.approx(0.16135, abs=2e-5) and lb > adr.U_T_S * 1e3
+    for k in (0.7344681196147431, 1.2257, adr.K_HI):
+        r = adr.exact_worst(k, nph=301, nm=48)
+        assert r["t10_err_max_ms"] <= lb + 1e-9
+        assert r["t10_err_max_ms"] > 0.14
+
+
+def test_r3_lattice_bound_formula():
+    w10 = adr.free_fall_points()["w10_dps"]
+    n_up = math.ceil(adr.DROP_LIM / adr.Q_REQ)
+    tpart = (1 / adr.FS_REQ + adr.ENC_LAT_S + adr.TRIG_SKEW_S + adr.REL_SKEW_S) * 1e3
+    assert adr.lattice_bound() == pytest.approx(tpart + ((n_up + 1) * adr.Q_REQ - 10) / w10 * 1e3)
+    assert adr.lattice_bound(pivot=False) == pytest.approx(tpart + (n_up * adr.Q_REQ - 10) / w10 * 1e3)
+    assert adr.lattice_bound(pivot=False) < adr.U_T_S * 1e3  # the one-channel chain meets U_t by construction
+
+
+def test_r3_lattice_bound_options():
+    q = adr.Q_REQ
+    # equal steps: (n+1) q; mixed 17/18 bit: finer lattice with slack qj+qp, which equals the 17/17 value
+    assert adr.lattice_bound(q_p=q / 2) == pytest.approx(adr.lattice_bound())
+    assert adr.lattice_bound(q_j=q / 2, q_p=q / 2) < adr.U_T_S * 1e3
+    assert adr.lattice_bound(fs=20000.0) < adr.U_T_S * 1e3
+    assert adr.lattice_bound(lat=0.0) < adr.lattice_bound()
+
+
+def test_r3_k_rounding_can_flip_a_row():
+    """k_lo vs its 4-digit rounding: same drop, different supremum (coarse grids)."""
+    a = adr.exact_worst(adr.K_LO_CAP, nph=401, nm=64)["t10_err_max_ms"]
+    b = adr.exact_worst(adr.K_ROUNDED[0], nph=401, nm=64)["t10_err_max_ms"]
+    assert abs(a - b) > 1e-3
+
+
+def test_r3_deceleration_grid_unit():
+    """Measured deceleration is an integer number of grid units (q fs^2 / W^2), so a limit 'just above the
+    maximum' is a draw-dependent grid value."""
+    unit = adr.Q_REQ * adr.FS_REQ**2 / 15**2
+    tr = adr.simulate(adr.t_on_for_peak(10.0, 30.0), 30.0)
+    m = adr.measure2(tr, adr.Chain2(pivot=False, sigma_counts=1.0), _rng(20), 200, ref=False)
+    u = m["max_dec"] / unit
+    assert np.allclose(u, np.round(u), atol=1e-6)
+    assert unit == pytest.approx(2746.58, abs=0.01)
+
+
+def test_r3_loosening_bases():
+    w10 = adr.free_fall_points()["w10_dps"]
+    assert adr.U_T_S * 1e3 + adr.Q_REQ / adr.W10_MIN_PR9 * 1e3 == pytest.approx(0.17711, abs=2e-5)
+    assert adr.U_T_S * 1e3 + adr.Q_REQ / w10 * 1e3 == pytest.approx(0.17663, abs=2e-5)
+
+
+def test_r3_committed_values():
+    R = json.loads((ROOT / "results" / "angle_detector_risk.json").read_text())
+    r3 = R["r3"]
+    ex = r3["exact"]
+    assert not ex["k_hi_100mm"]["t10_ok"] and not ex["k_lo_rounded"]["t10_ok"] and ex["k_lo"]["t10_ok"]
+    assert ex["one_channel"]["t10_ok"] and ex["one_channel"]["d200_ok"]
+    assert (
+        r3["sweep"]["n_t10_fail"] >= 1 and r3["sweep"]["t10_max_ms"] <= r3["lattice_bound_ms"]["two_channel"]
+    )
+    assert r3["t10_worst_ms"] <= r3["lattice_bound_ms"]["two_channel"] + 1e-9
+    assert r3["loosen"]["u_t_pr9_basis_ms"] > r3["loosen"]["u_t_gov_ms"]
+    for pool in ("clean_two", "clean_one"):
+        c = r3[pool]
+        assert c["max_units"] == pytest.approx(round(c["max_units"]), abs=1e-6)
+        assert c["n_over_limit"] == 0 or c["over_limit"]["p"] > 0
+    assert r3["revc"]["ratio_to_guard"] == pytest.approx(0.1 / adr.GUARD_DEG)
+    ks = {round(v["dk"], 8): v for v in r3["k_sens"]}
+    assert (
+        ks[0.0]["t10_ok"] and not ks[round(adr.K_ROUNDED[0] - adr.K_LO_CAP, 8)]["t10_ok"]
+    )  # a 3e-5 change in k flips it
+    assert r3["limit_sens"]["range_41500"][0] >= r3["limit_sens"]["range_38500"][0]
+
+
+def test_r3_doc_says_pr9_is_merged():
+    doc = (ROOT / "docs" / "angle_detector_risk.md").read_text()
+    assert "not merged" not in doc
+    assert "merged to main at `335d4e5`" in doc

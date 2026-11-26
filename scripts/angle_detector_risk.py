@@ -24,6 +24,7 @@ import json
 import math
 import re
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -676,6 +677,7 @@ def compute() -> dict:
     plan["p_for_5pct"] = {f"n{n}": 1 - 0.95 ** (1 / n) for n in N_PLAN}
     R["plan"] = plan
     R["r2"] = round2(rng, trajs)  # fix round 2: appended so round-1 draws are unchanged
+    R["r3"] = round3(rng, trajs)  # fix round 3: appended last so earlier draws are unchanged
     derive(R)
     return R
 
@@ -1158,6 +1160,226 @@ def round2(rng, trajs) -> dict:
     return out
 
 
+# ---------------------------------------------------------------- fix round 3 (FC round 2 on PR #14)
+# Grid brute force of the two-channel chain per k (the sup over sampling phase x both mount phases), the
+# lattice-aware bound, k-rounding sensitivity, options on the same footing, the loosening figure on PR #9's
+# w10_min basis, and the draw dependence of the "just above the clean maximum" limits. ALL SYNTHETIC.
+W10_MIN_PR9 = 160.37267871298388  # deg/s, PR #9 docs/ba15_numbers.json syn.hw.budget.w10_min (main, 335d4e5)
+K_ROUNDED = (0.7345, 1.2655)  # the rounded k values quoted in round 1 and in FC's run
+N_K_SWEEP = 41  # k values across the 46.3 mm range
+
+
+def exact_worst(
+    k, fs=FS_REQ, q_j=Q_REQ, q_p=Q_REQ, lat=ENC_LAT_S, nph=2001, nm=128, pivot=True, interp=False
+):
+    """Grid brute force over sampling phase (nph) x joint mount (nm) x pivot mount (nm), skew fixed at the
+    edge that reads times late: worst (largest) crossing error in ms and worst (lowest) drop-at-200 ms error
+    in deg of the free-fall governing cell. A grid maximum is a lower bound of the supremum, within the grid
+    spacing."""
+    tr = free_fall_traj()
+    ff = free_fall_points()
+    t10, d200 = ff["t10_ms"] / 1e3, ff["drop200_deg"]
+    skew = TRIG_SKEW_S + REL_SKEW_S  # times read late by this much
+    m1 = np.linspace(0.0, q_j, nm, endpoint=False)[:, None, None]
+    m2 = np.linspace(0.0, q_p, nm, endpoint=False)[None, :, None] if pivot else np.zeros((1, 1, 1))
+    base = np.floor(m1 / q_j) * q_j - (np.floor(m2 / q_p) * q_p if pivot else 0.0)
+    j0 = int(math.floor((t10 - 0.0004 - BASE_WIN[0]) * fs))
+    jc = np.arange(j0, j0 + int(0.001 * fs) + 3)
+    wt, wd = -np.inf, np.inf
+
+    def dm_at(p, js):
+        ts = BASE_WIN[0] + p + js / fs
+        ang = -tr.drop(ts - lat)[None, None, :]
+        v = np.floor((k * ang + m1) / q_j) * q_j
+        if pivot:
+            v = v - np.floor(((k - 1.0) * ang + m2) / q_p) * q_p
+            return ts + skew, base - v
+        return ts + skew, (base - v) / k
+
+    for p in np.linspace(0.0, 1.0 / fs, nph, endpoint=False):
+        tm, dm = dm_at(p, jc)
+        hit = dm >= DROP_LIM
+        assert hit.any(axis=2).all()
+        i1 = np.argmax(hit, axis=2)
+        if interp:
+            d0 = np.take_along_axis(dm, np.maximum(i1 - 1, 0)[..., None], 2)[..., 0]
+            d1 = np.take_along_axis(dm, i1[..., None], 2)[..., 0]
+            fr = np.where(d1 > d0, (DROP_LIM - d0) / np.where(d1 > d0, d1 - d0, 1.0), 1.0)
+            tc = tm[np.maximum(i1 - 1, 0)] + fr / fs
+        else:
+            tc = tm[i1]
+        wt = max(wt, float(((tc - t10) * 1e3).max()))
+        i2 = int(math.floor((CATCH_MS / 1e3 - skew - BASE_WIN[0] - p) * fs))
+        tm2, dm2 = dm_at(p, np.array([i2, i2 + 1]))
+        if interp:
+            dd = dm2[..., 0] + (CATCH_MS / 1e3 - tm2[0]) * fs * (dm2[..., 1] - dm2[..., 0])
+        else:
+            dd = dm2[..., 0]
+        wd = min(wd, float((dd - d200).min()))
+    return dict(
+        t10_err_max_ms=wt, d200_err_min_deg=wd, t10_ok=bool(wt <= U_T_S * 1e3), d200_ok=bool(-wd <= GUARD_DEG)
+    )
+
+
+def lattice_bound(fs=FS_REQ, q_j=Q_REQ, q_p=Q_REQ, lat=ENC_LAT_S, pivot=True):
+    """Lattice-aware bound on the crossing error (ms): every timing term at its edge, plus the time the arm
+    needs, at the 10 deg crossing speed, to cover the extra drop after which a quantized reading is
+    guaranteed to be at or above 10 deg. One channel: the reading is a multiple of q_j above d - q_j, so it
+    is >= n q_j (n = ceil(10 / q_j)) once d >= n q_j. Two channels: the reading is a multiple of the finer
+    step L above d - (q_j + q_p), so it is >= n L once d >= (n - 1) L + q_j + q_p (equal steps: (n + 1) q)."""
+    w10 = free_fall_points()["w10_dps"]
+    tpart = (1.0 / fs + lat + TRIG_SKEW_S + REL_SKEW_S) * 1e3
+    if pivot:
+        step = min(q_j, q_p)
+        n = math.ceil(DROP_LIM / step - 1e-12)
+        need = (n - 1) * step + q_j + q_p
+    else:
+        n = math.ceil(DROP_LIM / q_j - 1e-12)
+        need = n * q_j
+    return tpart + (need - DROP_LIM) / w10 * 1e3
+
+
+def clean_pool(trajs, rng, two_channel, per, limit):
+    """Clean (no fault) trials with 1 count of noise per channel over the four arrest torques: where the
+    largest measured deceleration falls on its grid, and how often the limit would flag a clean trial."""
+    unit = (
+        Q_REQ * FS_REQ**2 / max(1, int(round(1e-3 * FS_REQ))) ** 2
+    )  # deg/s^2 per count of second difference
+    mx, flagged, run_flag, motion, n = 0.0, 0, 0, 0, 0
+    ks = (K_LO_CAP, 1.0001, K_HI_CAP) if two_channel else (1.0,)
+    for Th in T_ARREST:
+        for kk in ks:
+            m = measure2(trajs[(Th, 0.0)], Chain2(k=kk, pivot=two_channel), rng(), per, ref=False)
+            mx = max(mx, float(m["max_dec"].max()))
+            flagged += int((m["max_dec"] > limit).sum())
+            run_flag += int((m["run"] > RUN_LIM).sum())
+            motion += int(m["motion_bad"].sum())
+            n += m["peak"].size
+    return dict(
+        n=n,
+        max_dec=mx,
+        unit=unit,
+        max_units=mx / unit,
+        limit=limit,
+        limit_units=limit / unit,
+        n_over_limit=flagged,
+        over_limit=_rate(np.arange(n) < flagged),
+        n_run_flag=run_flag,
+        n_motion_flag=motion,
+    )
+
+
+def _log(msg):
+    print(f"[{time.strftime('%H:%M:%S')}] {msg}", file=sys.stderr, flush=True)
+
+
+def round3(rng, trajs) -> dict:
+    out: dict = dict(
+        pr9_merge="335d4e586dd51cf818e0153672a31d0e37d90ea0",
+        pr9_merge_commit_on_main="a7b41e0",
+        w10_min_pr9=W10_MIN_PR9,
+    )
+    # 1. two-channel grid brute force at the key k values (FC items 1, 7)
+    rows = {}
+    for nm, kk in (
+        ("k_lo", K_LO_CAP),
+        ("k_lo_rounded", K_ROUNDED[0]),
+        ("k_1", 1.0001),
+        ("k_hi", K_HI_CAP),
+        ("k_hi_rounded", K_ROUNDED[1]),
+        ("k_hi_100mm", K_HI),
+    ):
+        rows[nm] = dict(k=kk, **exact_worst(kk))
+    rows["one_channel"] = dict(k=1.0, **exact_worst(1.0, pivot=False))
+    out["exact"] = rows
+    _log("round 3: sweep over k across the 46.3 mm range (c")
+    # 2. sweep over k across the 46.3 mm range (coarser grid)
+    ks = np.linspace(K_LO_CAP, K_HI_CAP, N_K_SWEEP)
+    sw = [dict(k=float(kk), **exact_worst(float(kk), nph=401, nm=64)) for kk in ks]
+    worst = max(sw, key=lambda r: r["t10_err_max_ms"])
+    out["sweep"] = dict(
+        n=len(sw),
+        grid="401 phases x 64 x 64 mounts",
+        t10_max_ms=worst["t10_err_max_ms"],
+        t10_max_k=worst["k"],
+        t10_min_ms=min(r["t10_err_max_ms"] for r in sw),
+        n_t10_fail=sum(not r["t10_ok"] for r in sw),
+        fail_ks=[r["k"] for r in sw if not r["t10_ok"]],
+        d200_min_deg=min(r["d200_err_min_deg"] for r in sw),
+        d200_max_deg=max(r["d200_err_min_deg"] for r in sw),
+        rows=sw,
+    )
+    out["lattice_bound_ms"] = dict(two_channel=lattice_bound(), one_channel=lattice_bound(pivot=False))
+    # 3. k rounding: the crossing sup depends on where k*d and (k-1)*d fall on the count grid
+    dks = (0.0, 1e-6, 1e-5, K_ROUNDED[0] - K_LO_CAP, 1e-4)  # the 4-digit rounding of k_lo is +3.2e-5
+    out["k_sens"] = [dict(dk=dk, k=K_LO_CAP + dk, **exact_worst(K_LO_CAP + dk)) for dk in dks]
+    _log("round 3: options on the same footing")
+    # 4. options on the same footing (grid brute force at k_lo / 1.0001 / k_hi)
+    opts = dict(
+        pivot_18bit=dict(q_p=Q_REQ / 2),
+        both_18bit=dict(q_j=Q_REQ / 2, q_p=Q_REQ / 2),
+        fs_20k=dict(fs=20000.0),
+        lat_0=dict(lat=0.0),
+        interp=dict(interp=True),
+    )
+    oo = {}
+    for nm, kw in opts.items():
+        r = {
+            kn: exact_worst(kk, nph=1001, nm=96, **kw)
+            for kn, kk in (("k_lo", K_LO_CAP), ("k_1", 1.0001), ("k_hi", K_HI_CAP))
+        }
+        r["t10_max_ms"] = max(v["t10_err_max_ms"] for v in r.values() if isinstance(v, dict))
+        r["d200_min_deg"] = min(v["d200_err_min_deg"] for v in r.values() if isinstance(v, dict))
+        r["passes_all"] = bool(r["t10_max_ms"] <= U_T_S * 1e3 and -r["d200_min_deg"] <= GUARD_DEG)
+        oo[nm] = r
+    out["options"] = oo
+    out["lattice_bound_options_ms"] = dict(
+        both_18bit=lattice_bound(q_j=Q_REQ / 2, q_p=Q_REQ / 2),
+        fs_20k=lattice_bound(fs=20000.0),
+        lat_0=lattice_bound(lat=0.0),
+        pivot_18bit=lattice_bound(q_p=Q_REQ / 2),
+    )
+    # 5. loosening on both bases
+    w10 = free_fall_points()["w10_dps"]
+    out["loosen"] = dict(
+        u_t_gov_ms=U_T_S * 1e3 + Q_REQ / w10 * 1e3,
+        u_t_pr9_basis_ms=U_T_S * 1e3 + Q_REQ / W10_MIN_PR9 * 1e3,
+        guard_deg=GUARD_DEG + Q_REQ,
+        w10_gov=w10,
+    )
+    _log("round 3: clean pools for the deceleration limits")
+    # 6. the "just above the clean maximum" limits are draw-dependent maxima on a grid
+    out["clean_two"] = clean_pool(trajs, rng, True, 2000, 58000.0)
+    out["clean_one"] = clean_pool(trajs, rng, False, 4000, 38500.0)
+    # 7. Rev C "<= 0.1 deg": read as a step (this model) or as an accuracy bound (not modelled)
+    out["revc"] = dict(step_deg=REVC_JOINT_RES_DEG, ratio_to_guard=REVC_JOINT_RES_DEG / GUARD_DEG)
+    _log("round 3: random-draw maxima at the rounded k")
+    # 8. random-draw maxima at the rounded k values (lower bounds of the exact sup), appended last
+    out["mc_rounded"] = {
+        nm: budget_two_channel(kk, rng())
+        for nm, kk in (("k_lo_rounded", K_ROUNDED[0]), ("k_hi_rounded", K_ROUNDED[1]))
+    }
+    # 9. stuck-reading misses after the checks at three deceleration limits: the round-2 value, one grid unit
+    # above the larger clean pool's maximum, and the illustrative 50,000 (appended last)
+    lims = (38500.0, 41500.0, A_LIM)
+    rows = {}
+    for nm, Th, t_hi in (
+        ("base_Th30", 30.0, None),
+        ("Th15", 15.0, None),
+        ("Th50", 50.0, None),
+        ("window_tend", 30.0, T_END),
+    ):
+        tr = trajs[(Th, 0.01)]
+        tr2 = Traj(
+            tr.t, tr.d, tr.t_c if t_hi is None else t_hi, tr.peak, tr.t_on, tr.T_h, tr.rebound, tr.t_peak
+        )
+        m = measure2(tr2, Chain2(pivot=False, joint=Fault("stuck", t=float("nan"))), rng(), N_SENS, ref=False)
+        drop = score_angle(m["peak"])
+        rows[nm] = {f"{int(a)}": _rate(~drop & ~(m["motion_bad"] | (m["max_dec"] > a))) for a in lims}
+    out["limit_sens"] = dict(limits=list(lims), rows=rows)
+    return out
+
+
 def derive(R) -> None:
     """Summary values quoted in the doc (all computed from the results above)."""
     R["inputs"]["skew_total_ms"] = R["inputs"]["trig_skew_ms"] + R["inputs"]["rel_skew_ms"]
@@ -1206,6 +1428,28 @@ def derive(R) -> None:
     # so its result is quoted only for the 1-count-noise row
     sens.pop("range_after_tight_run", None)
     sens["ci_halfwidth_n400_pts"] = (sens["round1_ci_n400"][1] - sens["round1_ci_n400"][0]) / 2 * 100
+    # fix round 3 summaries
+    r3 = R["r3"]
+    ex = r3["exact"]
+    key = [ex[k] for k in ("k_lo", "k_lo_rounded", "k_1", "k_hi", "k_hi_rounded", "k_hi_100mm")]
+    sw = r3["sweep"]
+    r3["t10_worst_ms"] = max(sw["t10_max_ms"], max(r["t10_err_max_ms"] for r in key))
+    r3["t10_over_ms"] = r3["t10_worst_ms"] - U_T_S * 1e3
+    r3["d200_worst_deg"] = min(sw["d200_min_deg"], min(r["d200_err_min_deg"] for r in key))
+    r3["d200_over_deg"] = -r3["d200_worst_deg"] - GUARD_DEG
+    r3["fail_rows"] = [k for k in ("k_lo", "k_1", "k_hi", "k_hi_100mm") if not ex[k]["t10_ok"]]
+    r3["n_k_total"] = sw["n"]
+    ls = r3["limit_sens"]["rows"]
+    for a in ("38500", "41500", "50000"):
+        r3["limit_sens"][f"range_{a}"] = [
+            min(v[a]["p"] for v in ls.values()),
+            max(v[a]["p"] for v in ls.values()),
+        ]
+    r3["grids"] = dict(
+        key="2001 sampling phases x 128 joint mounts x 128 pivot mounts",
+        options="1001 sampling phases x 96 joint mounts x 96 pivot mounts",
+    )
+    r3["clean_two"]["limit_units_int"] = round(r3["clean_two"]["limit_units"], 2)
 
 
 def _f(x, fmt):
@@ -1266,6 +1510,8 @@ def tables(R) -> dict:
     )
     if "r2" in R:
         t.update(r2_tables(R["r2"]))
+    if "r3" in R:
+        t.update(r3_tables(R["r3"], R["r2"]))
     return t
 
 
@@ -1369,6 +1615,84 @@ def r2_tables(r2) -> dict:
     )
 
 
+def _ok(flag):
+    return "pass" if flag else "**FAIL**"
+
+
+def r3_tables(r3, r2) -> dict:
+    ex = r3["exact"]
+    lab = [
+        ("k_lo", "0.7345 (exact k_lo = 0.7344681, 46.3 mm low end)"),
+        ("k_lo_rounded", "0.7345 (rounded; round 1 and FC)"),
+        ("k_1", "1.0001"),
+        ("k_hi", "1.2655 (exact k = 1.2655319, 46.3 mm high end)"),
+        ("k_hi_rounded", "1.2655 (rounded)"),
+        ("k_hi_100mm", "1.5862 (100 mm high end)"),
+    ]
+    rows = []
+    for key, nm in lab:
+        e = ex[key]
+        mc = r2["budget"].get(key) or r3["mc_rounded"].get(key)
+        mcs = f"{mc['t10_err_max_ms']:.5f}" if mc else "n/a"
+        rows.append(
+            f"| joint − pivot, k {nm} | {e['t10_err_max_ms']:.5f} | {_ok(e['t10_ok'])} | "
+            f"{e['d200_err_min_deg']:.5f} | {_ok(e['d200_ok'])} | {mcs} |"
+        )
+    e = ex["one_channel"]
+    rows.append(
+        f"| one channel (forearm read directly) | {e['t10_err_max_ms']:.5f} | {_ok(e['t10_ok'])} | "
+        f"{e['d200_err_min_deg']:.5f} | {_ok(e['d200_ok'])} | "
+        f"{r2['budget']['one_channel']['t10_err_max_ms']:.5f} |"
+    )
+    olab = dict(
+        pivot_18bit="pivot channel 18 bits (joint 17)",
+        both_18bit="both channels 18 bits",
+        fs_20k="sampling 20 kHz",
+        lat_0="angle-path latency 0 (bound case)",
+        interp="linear interpolation of crossing and drop at 200 ms",
+    )
+    lb = r3["lattice_bound_options_ms"]
+    opt = []
+    for k, nm in olab.items():
+        o = r3["options"][k]
+        lbs = f"{lb[k]:.5f}" if k in lb else "n/a"
+        opt.append(
+            f"| {nm} | {o['t10_max_ms']:.5f} | {o['d200_min_deg']:.5f} | "
+            f"{'passes' if o['passes_all'] else '**fails**'} | {lbs} |"
+        )
+    ks = ", ".join(f"{x:.4f}" for x in r3["sweep"]["fail_ks"])
+    ksens = []
+    for v in r3["k_sens"]:
+        ksens.append(
+            f"| k_lo {v['dk']:+.1e} = {v['k']:.7f} | {v['t10_err_max_ms']:.5f} | {_ok(v['t10_ok'])} |"
+        )
+
+    def pool(c, lim):
+        return (
+            f"{c['n']} clean trials; largest measured deceleration {c['max_dec']:.1f} °/s² = "
+            f"{c['max_units']:.2f} grid units of {c['unit']:.2f} °/s²; limit {lim:.0f} °/s² = "
+            f"{c['limit_units']:.2f} units; trials over the limit {c['n_over_limit']}, "
+            f"95 % upper bound on the false-INVALID rate {c['over_limit']['ci'][1]:.3%}"
+        )
+
+    inl = []
+    for k, nm in olab.items():
+        v = r2["budget"]["options"][k]
+        inl.append(
+            f"{nm} {max(v[x]['t10_err_max_ms'] for x in ('k_lo', 'k_1', 'k_hi')):.5f} ms / "
+            f"{min(v[x]['d200_err_min_deg'] for x in ('k_lo', 'k_1', 'k_hi')):.5f}°"
+        )
+    return dict(
+        r2_options_table_inline="; ".join(inl),
+        r3_budget_table="\n".join(rows),
+        r3_options_table="\n".join(opt),
+        r3_fail_ks=ks,
+        r3_ksens_table="\n".join(ksens),
+        r3_pool_two=pool(r3["clean_two"], 58000.0),
+        r3_pool_one=pool(r3["clean_one"], 38500.0),
+    )
+
+
 # ---------------------------------------------------------------- doc rendering
 PH = re.compile(r"\{\{([^{}|]+)(?:\|([^{}]*))?\}\}")
 
@@ -1404,6 +1728,9 @@ def _jsonable(x):
 def main(argv) -> int:
     R = _jsonable(compute())
     text = json.dumps(R, indent=1, sort_keys=True) + "\n"
+    if "--check" not in argv:  # save the slow results before rendering: a template error must not lose them
+        RESULTS.parent.mkdir(exist_ok=True)
+        RESULTS.write_text(text)
     doc = render(R, TEMPLATE.read_text())
     if "--check" in argv:
         bad = []
@@ -1413,8 +1740,6 @@ def main(argv) -> int:
             bad.append(str(DOC))
         print("MISMATCH: " + ", ".join(bad) if bad else "OK: results and doc reproduce")
         return 1 if bad else 0
-    RESULTS.parent.mkdir(exist_ok=True)
-    RESULTS.write_text(text)
     DOC.write_text(doc)
     print(f"wrote {RESULTS.relative_to(ROOT)} and {DOC.relative_to(ROOT)}")
     return 0

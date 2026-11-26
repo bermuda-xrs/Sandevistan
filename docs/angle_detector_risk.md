@@ -1,11 +1,11 @@
 # Angle-detector risk: the "drop past 10°" score of B-A15 / B9 (SYNTHETIC)
 
-**Status: draft for Fact Checker, fix round 2 (FC round 1 = PARTIAL). Every number here is SYNTHETIC: model and Monte Carlo output, not bench or human data. No trial was run and no recorded data was read.**
+**Status: draft for Fact Checker, fix round 3 (FC round 1 = PARTIAL, round 2 = PASS with minors; this round fixes the minors). Every number here is SYNTHETIC: model and Monte Carlo output, not bench or human data. No trial was run and no recorded data was read.**
 
-**Fix round 2, headline: the forearm-angle requirement (joint − pivot, section 8 item 1) FAILS PR #9's per-trial thresholds when scored with PR #9's chain.** The drop-at-200 ms error reaches -0.02630° against the 0.02627° guard (over by 3.1e-05°, at every k tested), and the crossing error reaches 0.16025 ms against U_t 0.15999 ms (over by 2.6e-04 ms, at k 1.2655). The thresholds are not loosened here; options are in section 10.1 and none is chosen.
+**Headline (rounds 2 and 3): the forearm-angle requirement (joint − pivot, section 8 item 1) FAILS PR #9's per-trial thresholds when scored with PR #9's chain.** The drop-at-200 ms error reaches -0.02630° against the 0.02627° guard (over by 3.1e-05°, at every k ≠ 1). The crossing error reaches 0.16094 ms against U_t 0.15999 ms (over by 9.6e-04 ms), and this crossing failure is **not specific to one k**: 4 of 41 k values across the 46.3 mm range fail (worst k 1.2257), and the lattice-aware bound for two 17-bit channels is 0.16135 ms. The thresholds are not loosened here; options are in section 10.1 and none is chosen.
 
 - Every number comes from `scripts/angle_detector_risk.py` (output `results/angle_detector_risk.json`). This file is rendered from `scripts/angle_detector_risk.template.md`; do not edit it by hand. `python scripts/angle_detector_risk.py --check` recomputes everything and compares.
-- **ASSUMPTION** marks anything without a source; the list is in section 9. Inputs quoted from PR #9 (`docs/ba15-testplan.md`, `scripts/ba15_numcheck.py`, `docs/ba15_numbers.json`; current head `335d4e5`, not merged; every quoted input is identical to `58cce8d`, which round 1 cited) and from the Rev C package (`exo/EMG_Exo_Package_RevC.md` §3.7 and BOM, not in this repo) are marked as quoted.
+- **ASSUMPTION** marks anything without a source; the list is in section 9. Inputs quoted from PR #9 (`docs/ba15-testplan.md`, `scripts/ba15_numcheck.py`, `docs/ba15_numbers.json`; merged to main at `335d4e5` on 2026-11-26 10:49 KST, merge commit `a7b41e0` (GitHub API `merged_at` 01:49:42Z); every quoted input is identical to `58cce8d`, which round 1 cited) and from the Rev C package (`exo/EMG_Exo_Package_RevC.md` §3.7 and BOM, not in this repo) are marked as quoted.
 - Constraints (Charlie): synthetic only, force assist only, no exact parts. Requirements below are stated as numbers, not as parts.
 
 ## What the "angle detector" is
@@ -24,8 +24,8 @@ The joint-angle chain that turns a physical arm drop into the B-A15 trial score 
 4. **Catch time cannot be measured to U_t from the angle.** Near speed zero the angle is flat. With 17 bits and no noise, the argmax time is early by up to 2.55 ms; a 15-sample speed-zero rule is off by up to 3.31 ms; with 1 count of noise the errors reach 236 ms. Meeting U_t would need 22–26 bits and no noise.
 5. **Gain and zero errors are not in the 0.0263° budget.** A gain error of -0.264% alone, or a zero-reference error of -0.0266° alone, makes a true 10.002° drop read NO DROP. A −0.5 % gain error missed 100% of true 10.01° drops, and no plausibility check flags it.
 6. **Noise never causes a miss here but widens the false-trip band.** The peak is a maximum, so noise biases it up. With 1 count of noise every arm at 0.03° below the limit or closer is scored DROP; with 4 counts, every arm within 0.05°. A 3-sample median brings the 4-count bias from +0.0292…+0.0570° to +0.0184…+0.0389°.
-7. **A stuck reading is the main missed-detection fault, and a frozen-count check catches it when the reading has noise.** These rates are *conditional*: they assume the freeze happens (no fault rate is known), at a uniform time in [0, t_c], on a true 10.01° peak with T_h 30 N·m (all ASSUMPTION). Under that model one channel frozen during the drop misses 98.0% (95 % CI 97.5%–98.4%, n 4000). Motion plus deceleration (50,000 °/s²) checks leave 26.4% (25.0%–27.8%); over the sensitivity cases 13.9%–35.7%. With the deceleration limit just above the clean maximum (38500 °/s²) they leave 9.3%–25.2%. Adding a frozen-count check (no run of identical raw counts longer than 10 ms) leaves 0.0% (CI upper 0.09%) with 1 count of noise. That check needs at least about 0.5 count of noise; with none, a held clean arm is "frozen" too (section 10.3). Round 1's "97.5 % / 26.2 %" was n 400 (±4.4 points) under the same conditions. A second reading is an option, not shown to be needed (section 10.2).
-8. **The Rev C joint-encoder requirement (0.1°) and the repo IMU default (150 Hz) both fail the budget.** At 0.1°: crossing time off by 0.609 ms, drop at 200 ms off by 0.089°. At 150 Hz: crossing time off by 6.66 ms (margin 1.905 ms), drop at 200 ms off by 1.045°. Defaults are quoted, not changed.
+7. **A stuck reading is the main missed-detection fault, and a frozen-count check catches it when the reading has noise.** These rates are *conditional*: they assume the freeze happens (no fault rate is known), at a uniform time in [0, t_c], on a true 10.01° peak with T_h 30 N·m (all ASSUMPTION). Under that model one channel frozen during the drop misses 98.0% (95 % CI 97.5%–98.4%, n 4000). Motion plus deceleration (50,000 °/s²) checks leave 26.4% (25.0%–27.8%); over the sensitivity cases 13.9%–35.7%. With the deceleration limit just above the clean maximum seen in round 2 (38500 °/s², a draw-dependent grid value; section 10.4) they leave 9.3%–25.2%. Adding a frozen-count check (no run of identical raw counts longer than 10 ms) leaves 0.0% (CI upper 0.09%) with 1 count of noise. That check needs at least about 0.5 count of noise; with none, a held clean arm is "frozen" too (section 10.3). Round 1's "97.5 % / 26.2 %" was n 400 (±4.4 points) under the same conditions. A second reading is an option, not shown to be needed (section 10.2).
+8. **The Rev C joint-encoder requirement (0.1°) and the repo IMU default (150 Hz) both fail the budget.** At 0.1° taken as the quantization step (the Rev C BOM says "absolute, ≤ 0.1 deg" without saying whether that is resolution or accuracy; if it is an accuracy bound, a 0.1° error is 3.8 times the 0.0263° guard, so the requirement fails either way): crossing time off by 0.609 ms, drop at 200 ms off by 0.089°. At 150 Hz: crossing time off by 6.66 ms (margin 1.905 ms), drop at 200 ms off by 1.045°. Defaults are quoted, not changed.
 9. **Plan level.** To keep the chance of at least one false DROP at 5 % or less, the per-trial false-trip rate must be at most 8.69e-04 over 59 trials and 1.55e-04 over 330. A rate of 1e-3 gives 5.7% and 28.1%.
 
 ## 1. Drop model and checks
@@ -175,7 +175,7 @@ True peak 10.01° (a real drop), T_h 30 N·m, 400 trials. Checks (ASSUMPTION): *
 
 ## 8. Requirements that follow (by requirement, no parts; SYNTHETIC basis)
 
-1. Score the **forearm** angle (device joint angle combined with the pivot angle), never the device joint angle alone. Log both raw channels. **Round 2: with PR #9's chain this FAILS PR #9's thresholds** (drop-at-200 -0.02630° vs 0.02627°; crossing 0.16025 ms vs 0.15999 ms). Something in section 10.1 has to change; Charlie decides which.
+1. Score the **forearm** angle (device joint angle combined with the pivot angle), never the device joint angle alone. Log both raw channels. **With PR #9's chain this FAILS PR #9's thresholds** (drop-at-200 -0.02630° vs 0.02627°; crossing up to 0.16094 ms vs 0.15999 ms, failing at 4 of 41 k across the 46.3 mm range). Something in section 10.1 has to change; Charlie decides which.
 2. Keep PR #9's chain (≥ 15 kHz, ≤ 0.0031° step, ≤ 0.019 ms latency, skews) and add to the angle budget: **gain/linearity error over the 0–15° span** and **zero-reference error**. Alone, each uses the whole guard at -0.264% and -0.0266°. Calibrate the angle scale on the dummy against a reference.
 3. **Angle noise ≤ 1 count RMS** at the scoring rate, or a stated filter (3-sample median at least) whose upward bias is added to the false-trip analysis.
 4. **Do not score the catch time from speed zero of the angle.** Either drop the time rule (the angle rule is the B9 quantity), or redefine it as a quantity the angle can measure at speed (for example the 10° crossing time) and recompute its window. FC and Charlie decide (PR #9 A9 is already open).
@@ -204,33 +204,49 @@ True peak 10.01° (a real drop), T_h 30 N·m, 400 trials. Checks (ASSUMPTION): *
 
 ### 10.1 Forearm angle (joint − pivot) against PR #9's thresholds: FAILS
 
-Two independent 17-bit channels, PR #9's chain otherwise unchanged (15 kHz, latency 0.019 ms, skew at the edge that reads late), free-fall governing cell, 200000 trials per row:
+Two independent 17-bit channels, PR #9's chain otherwise unchanged (15 kHz, latency 0.019 ms, skew at the edge that reads late), free-fall governing cell. **Exact columns** are a grid brute force over 2001 sampling phases x 128 joint mounts x 128 pivot mounts; a grid maximum is a lower bound of the true supremum, within the grid spacing. **MC column** is the round-2 random draw maximum, 200000 trials (also a lower bound).
 
-| Chain | Worst crossing error (ms) vs U_t 0.15999 | Result | Worst drop-at-200 error (°) vs −0.02627 | Result |
+| Chain | Exact worst crossing error (ms) vs U_t 0.15999 | Result | Exact worst drop-at-200 error (°) vs −0.02627 | Result | MC crossing (ms) |
+|---|---|---|---|---|---|
+| joint − pivot, k 0.7345 (exact k_lo = 0.7344681, 46.3 mm low end) | 0.15713 | pass | -0.02630 | **FAIL** | 0.15662 |
+| joint − pivot, k 0.7345 (rounded; round 1 and FC) | 0.16006 | **FAIL** | -0.02630 | **FAIL** | 0.15979 |
+| joint − pivot, k 1.0001 | 0.15513 | pass | -0.02630 | **FAIL** | 0.15519 |
+| joint − pivot, k 1.2655 (exact k = 1.2655319, 46.3 mm high end) | 0.16036 | **FAIL** | -0.02630 | **FAIL** | 0.16025 |
+| joint − pivot, k 1.2655 (rounded) | 0.14873 | pass | -0.02630 | **FAIL** | 0.14871 |
+| joint − pivot, k 1.5862 (100 mm high end) | 0.16079 | **FAIL** | -0.02630 | **FAIL** | 0.15034 |
+| one channel (forearm read directly) | 0.14457 | pass | -0.02355 | pass | 0.14455 |
+
+- **Round 3 correction.** Round 2 marked the k 1.5862 crossing row "pass" at 0.15034 ms; that was an MC maximum. The grid brute force gives 0.16079 ms, a FAIL. The crossing failure is not specific to the high end of k. Over 41 k values across the 46.3 mm range (coarser grid, 401 phases x 64 x 64 mounts) the worst crossing error is 0.16094 ms at k 1.2257; 4 of 41 k fail (k = 0.7743, 1.0398, 1.2257, 1.2655). The lattice-aware bound for two 17-bit channels (every timing term at its edge, plus the time the arm needs at the 10° crossing speed to cover n+1 counts above 10°) is 0.16135 ms, above U_t; one channel: 0.14471 ms.
+- The one-channel exact value here (0.14457 ms) uses 128 mount phases; section 3 quotes 0.14467 ms from 1001 mount phases.
+- The drop-at-200 error is -0.02630° at every k ≠ 1: the measured drop is a multiple of q that is more than 2q below the true drop at the last sample before 200 ms, whatever k is. One channel: -0.02355°.
+- The overrun is small (drop-at-200 by 3.1e-05°, crossing by 9.6e-04 ms). But the thresholds are hard per-trial pass lines, and the second channel's step is not in PR #9's budget. **This is a failing result.** PR #9's thresholds are not loosened here.
+- **Why FC's round-1 run read 0.16004 ms at k_lo while round 2's run read 0.15662 ms there (and why the rows differ).** It is not random draws alone. The crossing supremum depends on where k·d and (k−1)·d fall on the count grid, so a change of k of 3·10⁻⁵ can flip a row. FC's round-1 run used the rounded k 0.7345, where the grid supremum is 0.16006 ms (FAIL; my MC at 0.7345: 0.15979 ms). Round 2 used the exact k_lo = 0.7344681, where the supremum is 0.15713 ms (pass; round-2 MC 0.15662 ms). The 0.16025 ms of round 2 is a different row, k_hi = 1.2655319 (grid supremum 0.16036 ms). All MC values here are lower bounds of their suprema. The k-sensitivity of the supremum near k_lo (grid 2001 sampling phases x 128 joint mounts x 128 pivot mounts):
+
+| k | Exact worst crossing error (ms) | Result |
+|---|---|---|
+| k_lo +0.0e+00 = 0.7344681 | 0.15713 | pass |
+| k_lo +1.0e-06 = 0.7344691 | 0.15736 | pass |
+| k_lo +1.0e-05 = 0.7344781 | 0.15939 | pass |
+| k_lo +3.2e-05 = 0.7345000 | 0.16006 | **FAIL** |
+| k_lo +1.0e-04 = 0.7345681 | 0.15443 | pass |
+
+- Options that pass (exact columns at k_lo / 1.0001 / k_hi, grid 1001 sampling phases x 96 joint mounts x 96 pivot mounts; worst over the three k; the last column is the lattice-aware bound for that option). **None is chosen**; each is for HE / Charlie:
+
+| Option | Worst crossing error (ms) | Worst drop-at-200 error (°) | Result | Lattice-aware bound (ms) |
 |---|---|---|---|---|
-| joint − pivot, k 0.7345 (46.3 mm low) | 0.15662 | pass | -0.02630 | **FAIL** |
-| joint − pivot, k 1.0001 | 0.15519 | pass | -0.02630 | **FAIL** |
-| joint − pivot, k 1.2655 (46.3 mm high) | 0.16025 | **FAIL** | -0.02630 | **FAIL** |
-| joint − pivot, k 1.5862 (100 mm high) | 0.15034 | pass | -0.02630 | **FAIL** |
-| one channel (forearm read directly) | 0.14455 | pass | -0.02355 | pass |
+| pivot channel 18 bits (joint 17) | 0.16029 | -0.02630 | **fails** | 0.16135 |
+| both channels 18 bits | 0.15136 | -0.02493 | passes | 0.15303 |
+| sampling 20 kHz | 0.14366 | -0.02355 | passes | 0.14468 |
+| angle-path latency 0 (bound case) | 0.14124 | -0.02355 | passes | 0.14230 |
+| linear interpolation of crossing and drop at 200 ms | 0.10750 | -0.01741 | passes | n/a |
 
-- The overrun is small (drop-at-200 by 3.1e-05°, crossing by 2.6e-04 ms). But the thresholds are hard per-trial pass lines, and the second channel's step is not in PR #9's budget. **This is a failing result.** PR #9's thresholds are not loosened here.
-- Options that pass in this check (same MC, k 0.7345 / 1.0001 / 1.2655; worst over the three). **None is chosen**; each is for HE / Charlie:
-
-| Option | Worst crossing error (ms) | Worst drop-at-200 error (°) | Result |
-|---|---|---|---|
-| pivot channel 18 bits (joint 17) | 0.16012 | -0.02630 | **fails** |
-| both channels 18 bits | 0.15135 | -0.02493 | passes |
-| sampling 20 kHz | 0.14366 | -0.02355 | passes |
-| angle-path latency 0 (bound case) | 0.14101 | -0.02355 | passes |
-| linear interpolation of crossing and drop at 200 ms | 0.10728 | -0.01742 | passes |
-
-- Loosening option (Charlie's call only, not proposed): add one pivot count to each budget, giving U_t 0.1766 ms and guard 0.0290°.
-- "Latency 0" is a bound case showing that latency is one of the terms that matters, not a buildable value. Interpolation changes the scoring rule, which is PR #9's. A pass here is an MC result (A13).
+  The MC values for the same options (round 2) were: pivot channel 18 bits (joint 17) 0.16012 ms / -0.02630°; both channels 18 bits 0.15135 ms / -0.02493°; sampling 20 kHz 0.14366 ms / -0.02355°; angle-path latency 0 (bound case) 0.14101 ms / -0.02355°; linear interpolation of crossing and drop at 200 ms 0.10728 ms / -0.01742°.
+- Loosening option (Charlie's call only, not proposed): add one pivot count to each budget. The crossing figure depends on the speed used for the count: U_t 0.1771 ms on PR #9's own basis (`w10_min` 160.373 °/s, the basis of PR #9's angle term), or 0.1766 ms at the governing cell's 165.046 °/s. Guard 0.0290° on either basis.
+- "Latency 0" is a bound case showing that latency is one of the terms that matters, not a buildable value. Interpolation changes the scoring rule, which is PR #9's. A pass here is a grid result (A13).
 
 ### 10.2 Faults on both channels, common-mode faults, and checks
 
-Forearm = joint − pivot at k 0.7345 (the 46.3 mm low end, where a frozen pivot under-reads), true peak 10.01°, T_h 30 N·m, 1 count of noise per channel, 2000 trials per row. Checks are cumulative left to right: base = motion + deceleration limit 58000 °/s² (just above the clean two-channel maximum 57678); + frozen count = no run of identical raw counts on either channel longer than 10 ms; + cross-check = second reading within 0.05°.
+Forearm = joint − pivot at k 0.7345 (the 46.3 mm low end, where a frozen pivot under-reads), true peak 10.01°, T_h 30 N·m, 1 count of noise per channel, 2000 trials per row. Checks are cumulative left to right: base = motion + deceleration limit 58000 °/s² (chosen just above the largest clean two-channel deceleration seen, 57678 °/s², which is a draw-dependent maximum on a grid; see the next bullet); + frozen count = no run of identical raw counts on either channel longer than 10 ms; + cross-check = second reading within 0.05°.
 
 | Fault | Missed, no checks | Missed after base | After + frozen count | After + cross-check | Flagged INVALID (all checks) |
 |---|---|---|---|---|---|
@@ -255,6 +271,7 @@ Forearm = joint − pivot at k 0.7345 (the 46.3 mm low end, where a frozen pivot
 
 ¹ With no noise the frozen-count check also flags every clean trial (the held arm reads constant; 10.3), so the "+ frozen count" columns are not usable for these two rows.
 
+- **The limit is draw-dependent.** The measured deceleration is a second difference of quantized angle over 1 ms windows, so it takes values on a grid of 2746.58 °/s². A larger clean pool (round 3): 24000 clean trials; largest measured deceleration 57678.2 °/s² = 21.00 grid units of 2746.58 °/s²; limit 58000 °/s² = 21.12 units; trials over the limit 0, 95 % upper bound on the false-INVALID rate 0.015%. A maximum over a finite pool is not a bound: another set of draws can reach one grid unit higher (on the one-channel chain a larger pool did reach 41,199 °/s², one unit above the round-2 maximum, as FC's round-2 draws had; section 10.4). The false-INVALID rate at the limit is small but not zero.
 - Clean trials, all four arrest torques × k 0.7345 / 1.0001 / 1.2655, 12000 trials: flagged 0.0% (base), 0.0% (+ frozen count), 0.0% (+ cross-check). Longest clean run 1.13 ms.
 - Pivot frozen from onset at k 1.2655 over-reads: a true 9.95° arm is scored DROP 100.0% of the time (a false trip); the frozen-count check flags 100.0%.
 - What the rows show: a frozen pivot passes the round-1 checks every time (as FC found). The frozen-count check catches stuck readings on either channel, including a common acquisition freeze, but only when the reading has noise. Slips of 0.05° or more trip the deceleration check. Partial sticking is flagged but causes no miss here, because the arm is held at its peak. Backlash, drift and common gain are slow, and no check except the cross-check sees them. The cross-check cuts backlash 0.2° misses from 75.8% to 1.8% and drift from 96.2% to 57.9%. It does not help with a −0.5 % common gain (48.5%), because the under-read is about its 0.05° tolerance.
@@ -287,7 +304,7 @@ Conditions: the freeze always happens (no fault rate), at a uniform time over th
 | Freeze U[0, 10° crossing] | 99.2% (98.8%–99.4%) | 27.7% (26.3%–29.1%) | 18.4% (17.2%–19.6%) | 83% |
 | Freeze U[0, end of record] | 54.3% (52.8%–55.9%) | 13.9% (12.8%–15.0%) | 9.3% (8.4%–10.2%) | 81% |
 
-- 38500 °/s² is just above the clean one-channel maximum 38452 °/s² (1 count noise, four arrest torques, 4000 trials). With the frozen-count check added and 1 count of noise: 0.0% missed (CI 0.00%–0.09%), and clean trials flagged 0.0%.
+- 38500 °/s² is just above the largest clean one-channel deceleration seen, 38452 °/s² (1 count noise, four arrest torques, 4000 trials). It is a draw-dependent maximum on a grid of 2746.58 °/s²; larger clean pool (round 3): 16000 clean trials; largest measured deceleration 41198.7 °/s² = 15.00 grid units of 2746.58 °/s²; limit 38500 °/s² = 14.02 units; trials over the limit 2, 95 % upper bound on the false-INVALID rate 0.045%. The larger pool reached 41199 °/s² (15 units), one unit above the round-2 maximum, so 2 clean trials would have been flagged at 38500. **Sensitivity to the limit** (stuck during the drop, one channel with 1 count of noise, n 4000 per row; rows: base T_h 30, T_h 15, T_h 50, freeze window to end of record): after-check misses 7.5%–21.2% at 38,500; 9.1%–23.8% at 41,500 (one grid unit above the larger pool's maximum); 12.4%–32.4% at 50,000. The conclusion does not depend on which of these is used; the exact residual does. With the frozen-count check added and 1 count of noise: 0.0% missed (CI 0.00%–0.09%). Clean trials flagged by the deceleration limit: 0.0% in the round-2 pool (4000 trials), 2 of 16000 in the larger pool; the frozen-count check flagged 0.
 - Most after-check misses are gross under-reads (reading < 5°), not near-10° cases.
 
 ## 11. Reproduce
