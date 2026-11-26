@@ -8,6 +8,21 @@ import numpy as np
 
 from .stats import PLANNED_SESSIONS, PLANNED_SUBJECTS
 
+# Default synthetic sample rates (Hz). Real datasets differ, so these are parameters of the
+# source and of the CLI (--fs-emg / --fs-imu), never constants inside the detectors:
+#   Lucchetti et al. 2025 upper-limb set: EMG 1000 Hz, markers 125 Hz (HS02.mat EmgFreq/KinFreq).
+#   Rojas-Martinez et al. 2020 HD-EMG set: EMG 2048 Hz (no kinematics).
+DEFAULT_FS_EMG = 2000.0
+DEFAULT_FS_IMU = 150.0
+
+
+def check_rate(name: str, fs: float) -> float:
+    """Return ``fs`` as a float if it is a finite, positive sample rate; raise ValueError otherwise."""
+    fs = float(fs)
+    if not np.isfinite(fs) or fs <= 0:
+        raise ValueError(f"{name} must be a finite sample rate > 0 Hz, got {fs!r}")
+    return fs
+
 
 @dataclass(frozen=True)
 class Trial:
@@ -42,14 +57,18 @@ class SyntheticSource:
     subject_sd_ms: float = 8.0
     session_sd_ms: float = 6.0
     trial_sd_ms: float = 10.0
-    fs_emg: float = 2000.0
-    fs_imu: float = 150.0
+    fs_emg: float = DEFAULT_FS_EMG
+    fs_imu: float = DEFAULT_FS_IMU
     duration_s: float = 4.0
     emg_snr: float = 15.0  # burst amplitude / baseline noise amplitude (per session jitter applied)
     angle_noise_deg: float = 0.3
     seed: int = 0
     # EMG burst is drawn inside this window. A point range pins the onset (baseline tests).
     emg_onset_range_s: tuple[float, float] = (1.5, 2.5)
+
+    def __post_init__(self):
+        check_rate("fs_emg", self.fs_emg)
+        check_rate("fs_imu", self.fs_imu)
 
     def __iter__(self) -> Iterator[Trial]:
         # SeedSequence spawn tree: seed -> subject -> session -> trial. Child 0 of a subject or a
