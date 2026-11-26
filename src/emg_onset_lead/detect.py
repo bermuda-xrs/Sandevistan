@@ -499,7 +499,10 @@ class EmgOnsetDetector(_StreamDetector):
     def __init__(self, fs: float, params: EmgParams = EmgParams()):
         super().__init__(fs, params, two_sided=False)
         lo, hi = params.band_hz
-        hi = min(hi, 0.45 * fs)
+        hi = min(hi, 0.45 * fs)  # 450 Hz at 1000 Hz; the 20-450 Hz band is unchanged from 1000 Hz up
+        if not 0 < lo < hi:
+            raise ValueError(f"EMG band {params.band_hz} Hz does not fit fs = {fs:g} Hz "
+                             f"(upper edge capped at 0.45 * fs = {0.45 * fs:g} Hz)")
         bp_sos = signal.butter(params.order, [lo, hi], btype="bandpass", fs=fs, output="sos")
         self._bp = self._sos_stream(bp_sos)
         self._lp = self._sos_stream(
@@ -575,6 +578,8 @@ class ImuOnsetDetector(_StreamDetector):
     def __init__(self, fs: float, params: ImuParams = ImuParams()):
         if params.mode not in ("velocity", "angle"):
             raise ValueError(f"unknown mode {params.mode!r}")
+        if not 0 < params.smooth_hz < 0.5 * fs:
+            raise ValueError(f"IMU smooth_hz {params.smooth_hz:g} Hz must be below Nyquist ({0.5 * fs:g} Hz)")
         super().__init__(fs, params, two_sided=params.mode == "angle")
         self._lp = self._sos_stream(
             signal.butter(params.order, params.smooth_hz, btype="lowpass", fs=fs, output="sos"))

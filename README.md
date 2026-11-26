@@ -53,8 +53,12 @@ on the slow, low-SNR cells (synthetic):
 - A uniform prior on R. A log-spaced grid weights short rises and read about +2.5 ms late at
   80-150 ms rise, SNR 3.
 
-The `refine_s` wait gives the fit more of the rise. At 150 ms / SNR 3 the per-trial SD is 24 ms
-without the wait and 14 ms with it (synthetic, 200 trials). A wait beyond 0.1 s did not help further.
+The `refine_s` wait gives the fit more of the rise. It cuts the spread, not the bias: at 150 ms / SNR 3
+`RampOnset`'s per-trial SD is about 19-20 ms without it (19.2 and 20.0 ms; `refine_s` = 0.5 ms, one sample
+after the hold) and about 14-15 ms with the 0.1 s wait (13.8 and 15.0 ms), with a mean error within 1.6 ms
+either way (synthetic, 200 trials on each of 2 seeds; `scripts/refine_wait_sd.py`). `refine_s` = 0 is not
+"`RampOnset` without the wait": the detector then falls back to the line fit at the hold, which reads
+about 36 ms late there. Waiting 0.15 or 0.2 s did not help further (SD 14.9-16.1 ms, same script).
 
 At the commit sample the trigger is checked:
 - The envelope is still above threshold: a burst is on, and the fit runs to the commit.
@@ -111,7 +115,8 @@ mean needs many trials: FC's 40-trial run leaves the 150 ms / SNR 3 cell's CI at
 Limitations (synthetic):
 - The model is a linear amplitude ramp. An S-curve (smoothstep) burst reads late by about 10% of
   its rise: +3.7 ms at 40 ms, about +8 ms at 80 ms, +14 ms at 150 ms (SNR 15). `SyntheticSource`
-  uses a 40 ms smoothstep, so leads from it read about 3.9 ms short (see below). The 80/150 ms
+  uses a 40 ms smoothstep, so leads from it read about 3.9-4.0 ms short (3.927 ms over 16x3x10, 4.00 ms
+  over the smaller 8x3x5; see below). The 80/150 ms
   cases and the sign bias on `SyntheticSource` are strict xfails.
 - A burst that has ended by the commit must have peaked at >= 1.6x threshold, or it is treated
   as noise. Isolated 40 ms bursts at SNR 3 are missed about 22% of the time (FC: 234/300 kept).
@@ -135,6 +140,18 @@ Values at this checkout (synthetic):
 - **u = 0.135 ms** (range 0.097-0.166 over seeds). u_new_subject = 0.637 ms.
 - Guard band w = k*u: 0.135 / 0.270 / 0.405 ms for k = 1/2/3, so a gate of 68.805 / 68.940 /
   69.075 ms. With u_new_subject: 69.307 / 69.944 / 70.580 ms.
+
+The 4.00 ms in `tests/test_harness.py` is the same bias at 8x3x5, seeds 0-5: -3.996 ms, 95% CI
+[-4.258, -3.734]. Those 720 trials are a subset of the 2880 in the 16x3x10 study. They differ from
+the other 2160 (2159 detected) by -0.092 ms [-0.469, +0.284] (paired over 6 seeds, p = 0.556), so no
+difference is shown: 3.9 and 4.00 are one bias read at two sample sizes. The interval of the
+difference is 0.75 ms wide, so a difference as small as 0.07 ms is not excluded either.
+
+One of the 2880 trials is missed and left out of every 16x3x10 number here, including those of
+`bias_guard_band.py`: seed 1, S11-D3 T02, rejected by the EMG baseline-rest check. It is not one of the
+8x3x5 trials. Its subject mean uses 29 of 30 trials. Leaving out its whole session or its whole
+subject instead moves the bias over seeds from -3.927 to -3.918 or -3.923 ms (synthetic;
+`scripts/synthetic_source_spread.py`, part 5).
 
 These replace the stale base-608a151 values (bias +0.35 ms, u = 0.17 ms), and the values from before
 the `SyntheticSource` seed fix (bias -3.93 ms, 95% CI [-4.05, -3.81], u = 0.139 ms).
@@ -197,9 +214,9 @@ design SD of 8.91 ms (`SampleSize.design_subject_sd` with subject/session/trial 
 
 `SyntheticSource` seeds each subject, session and trial from its own node of a `SeedSequence` spawn
 tree. Until that fix, the subject used `default_rng([seed, s])` and session 0 used
-`default_rng([seed, s, 0])`. numpy pads a seed list shorter than its 4-word pool with zeros, so
-those were the same stream: session 0's offset was 0.75x the subject offset. Subject-mean true-lead
-SD, 16x3x10 (synthetic; `scripts/synthetic_source_spread.py`, `--pool-seeds 400` for the second row):
+`default_rng([seed, s, 0])`. numpy pads a seed list that converts to fewer 32-bit words (not
+list items) than its 4-word pool with zeros, so those were the same stream: session 0's offset was
+0.75x the subject offset. Subject-mean true-lead SD, 16x3x10 (synthetic; `scripts/synthetic_source_spread.py`, `--pool-seeds 400` for the second row):
 
 | pooled seeds | subjects | old seeding (95% CI) | now (95% CI) |
 |---|---:|---|---|
@@ -207,11 +224,38 @@ SD, 16x3x10 (synthetic; `scripts/synthetic_source_spread.py`, `--pool-seeds 400`
 | 0-399 | 6400 | 10.59 ms [10.41, 10.77] | 8.96 ms [8.81, 9.12] |
 
 In theory it is 10.55 ms with the old seeding and 8.91 ms with independent streams.
-`tests/test_synthetic_source_seeds.py` guards this.
+`tests/test_synthetic_source_seeds.py` guards this: no raw word of any stream is used twice, at any
+offset, within a seed or across the 12 seeds it checks (neighbouring seeds, strides 8 and 64, seeds equal
+modulo 2**32 or 10**6; reuse with seeds outside that list is not checked), and the gain, onset and noise
+draws are checked too.
+`scripts/mutate_synthetic_source.py` breaks the source and shows that each of those tests can fail.
+
+**Seeded outputs from before #7 do not reproduce.** Every `SyntheticSource` and `MinJerkSource` trial is a
+new draw at the same seed. Example: the true-lead subject-mean SD at seed 0 (16x3x10) went from 9.40 to
+8.76 ms (synthetic; both regenerated by `scripts/synthetic_source_spread.py`, part 2). Do not compare
+`trials.csv` or `summary.json` from before and after #7 trial by trial.
 
 The latency budget is 18.67 ms IMU path + 50 ms EMG extra = 68.67 ms. `--imu-path-ms` is the only
 way to change it. `--total-latency-ms` is a check only. It must equal the IMU path + 50 ms, and a
 mismatch is an error. It used to set the IMU path to total - 50 without saying so.
+
+Sample rates are parameters. The synthetic defaults are EMG 2000 Hz and angle/IMU 150 Hz; `--fs-emg`
+and `--fs-imu` override them (written to `summary.json` as `demo.fs_emg_hz` and `demo.fs_imu_hz`).
+The public datasets checked so far use other rates: Lucchetti et al. 2025
+(doi:10.1038/s41597-025-06174-3) has EMG at 1000 Hz and markers at 125 Hz (`EmgFreq`/`KinFreq` in
+HS02.mat), and Rojas-Martinez et al. 2020 (doi:10.1038/s41597-020-00717-6) has HD-EMG at 2048 Hz. On
+synthetic data the rates do not move the mean lead error: paired against 2000/150 Hz, the shift at
+1000/125, 2048/125, 2000/125 and 1000/150 Hz is at most 0.17 ms and every 95% interval contains 0
+(16 seeds x 72 trials, `SyntheticSource` and `MinJerkSource`, no misses). The per-trial SD changes by
+-1.0% to +6.6%, and the known smoothstep bias (about -4 ms) is unchanged. This check is at SNR 15
+only (synthetic; `scripts/dataset_rates_check.py`, part 1, with the current `SeedSequence` seeding).
+`tests/test_dataset_rates.py` guards 1000/125 and 2048/125. The detectors take `fs` from each `Trial`.
+The EMG band's upper edge is capped at 0.45 * fs, so it stays 20-450 Hz down to 1000 Hz. Below that
+the band narrows and the leads can be badly wrong, with no error: on a 2x1x3 run (seed 0, mean true
+lead 91.6 ms) the mean measured lead is 88.3 ms at 2000 Hz, 111.7 ms at 100 Hz, 213.1 ms at 50 Hz
+(1 of 6 trials missed) and 328.2 ms at 45 Hz (synthetic; same script, part 2). Nothing below 1000 Hz
+is tested for accuracy. A rate too low for the default EMG band (below about 44.4 Hz) or the IMU smoothing
+(20 Hz or less) raises a `ValueError`; in the CLI it is an argparse error (exit 2).
 
 ## Output
 `trials.csv`: `subject_id, session_id, trial_id, emg_onset_s, imu_onset_s, lead_ms, margin_ms,
@@ -225,7 +269,8 @@ re-donned; `plan_status` is `unverified` until real pilot variance exists; actua
 `gates` (lower bound, planned shape, missed-trial fraction), `sessions[]`, `subjects[]`, `pooled`,
 `pass`. `pass` requires the lower bound, the 16x3 shape, and a miss fraction at or below 10%.
 Pooled is the mean of subject means with a t-bound on subject means; `bootstrap_lower_bound_ms`
-is a seeded cluster bootstrap (reported only). See `PLAN.md`. The CLI adds `demo.single_seed`.
+is a seeded cluster bootstrap (reported only). See `PLAN.md`. The CLI adds `demo.single_seed`
+and the sample rates `demo.fs_emg_hz` / `demo.fs_imu_hz`.
 
 ## Data
 Only synthetic data is used. `SyntheticSource` is a critically damped 60 deg step (nonzero

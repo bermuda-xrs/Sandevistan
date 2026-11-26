@@ -5,9 +5,10 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 
+from .detect import EmgOnsetDetector, ImuOnsetDetector
 from .harness import Harness
 from .latency import LatencyConfig
-from .sources import SyntheticSource
+from .sources import DEFAULT_FS_EMG, DEFAULT_FS_IMU, SyntheticSource, check_rate
 from .stats import PLANNED_SESSIONS, PLANNED_SUBJECTS, LeadStats, SampleSize
 
 # --total-latency-ms is compared to imu_path_ms + emg_extra_ms, which LatencyConfig rounds to 1e-6 ms.
@@ -34,10 +35,25 @@ def main(argv=None) -> int:
                         "It never changes --imu-path-ms; a mismatch is an error")
     r.add_argument("--triggered", action="store_true",
                    help="add measured EMG confirmation delay to the 68.67 ms budget")
+    r.add_argument("--fs-emg", type=float, default=DEFAULT_FS_EMG,
+                   help=f"synthetic EMG sample rate in Hz (default {DEFAULT_FS_EMG:g}; "
+                        "Lucchetti 2025: 1000, Rojas-Martinez 2020: 2048)")
+    r.add_argument("--fs-imu", type=float, default=DEFAULT_FS_IMU,
+                   help=f"synthetic angle/IMU sample rate in Hz (default {DEFAULT_FS_IMU:g}; "
+                        "Lucchetti 2025 markers: 125)")
     r.add_argument("--out", type=Path, default=Path("out"))
     a = p.parse_args(argv)
     if not a.synthetic:
         p.error("only --synthetic is supported (no real dataset loaders are shipped)")
+
+    try:
+        fs_emg, fs_imu = check_rate("--fs-emg", a.fs_emg), check_rate("--fs-imu", a.fs_imu)
+        # Build the default detectors once so a rate too low for the EMG band (below ~44.4 Hz) or
+        # the IMU smoothing (at or below 20 Hz) is an argparse error here, not a traceback mid-run.
+        EmgOnsetDetector(fs_emg)
+        ImuOnsetDetector(fs_imu)
+    except ValueError as exc:
+        p.error(str(exc))
 
     lat = LatencyConfig(triggered=a.triggered)
     if a.imu_path_ms is not None:
@@ -51,7 +67,8 @@ def main(argv=None) -> int:
         p.error("--seeds must be >= 1")
     results = []
     for seed in seeds:
-        src = SyntheticSource(a.subjects, a.sessions, a.trials, true_lead_ms=a.true_lead_ms, seed=seed)
+        src = SyntheticSource(a.subjects, a.sessions, a.trials, true_lead_ms=a.true_lead_ms, seed=seed,
+                              fs_emg=fs_emg, fs_imu=fs_imu)
         part = Harness.run(src, lat)
         if len(seeds) > 1:
             part = [replace(row, subject_id=f"{row.subject_id}-seed{seed}",
@@ -63,6 +80,8 @@ def main(argv=None) -> int:
         "single_seed": len(seeds) == 1,
         "seeds": seeds,
         "design_subject_sd_ms": design_sd,
+        "fs_emg_hz": fs_emg,
+        "fs_imu_hz": fs_imu,
         "note": (
             "Single-seed demo. The subject-mean SD is one draw; under the synthetic variances "
             f"it is expected to be {design_sd:.2f} ms (subject/session/trial SDs 8/6/10 ms, "
