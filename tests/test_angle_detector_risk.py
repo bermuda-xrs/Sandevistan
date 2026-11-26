@@ -14,8 +14,9 @@ import numpy as np
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-_spec = importlib.util.spec_from_file_location("angle_detector_risk",
-                                               ROOT / "scripts" / "angle_detector_risk.py")
+_spec = importlib.util.spec_from_file_location(
+    "angle_detector_risk", ROOT / "scripts" / "angle_detector_risk.py"
+)
 adr = importlib.util.module_from_spec(_spec)
 sys.modules["angle_detector_risk"] = adr  # dataclasses need the module registered
 _spec.loader.exec_module(adr)
@@ -93,8 +94,8 @@ def test_quantized_drop_is_whole_counts(tr10):
     assert np.max(np.abs(m["peak"] - tr10.peak)) < ch.q
 
 
-def test_realised_noise_and_phase_match_design(tr10):
-    """Realised random components must match the design (failures log 2026-11-22)."""
+def test_round1_chain_phase_mean(tr10):
+    """Round-1 chain: realised sampling-phase mean only (full design check: test_r2_realised_components)."""
     ch = adr.Chain(q=0.0, lat=0.0, sigma=0.01)
     rng = np.random.default_rng(np.random.SeedSequence(4))
     m = adr.measure(adr.simulate(), ch, rng, n=400)
@@ -152,3 +153,114 @@ def test_committed_results_key_values():
 def test_no_repo_detector_import():
     src = (ROOT / "scripts" / "angle_detector_risk.py").read_text()
     assert "emg_onset_lead" not in src.replace("# ", "")
+
+
+# ---------------------------------------------------------------- fix round 2
+
+
+def _rng(i):
+    return np.random.default_rng(np.random.SeedSequence([2026, i + 1]))
+
+
+def test_r2_realised_components():
+    """Realised noise SD, skew, sampling phase and mount phase match the design (failures log 2026-11-22)."""
+    ch = adr.Chain2(pivot=False, q=1e-9, sigma_counts=1e7)  # noise SD = 0.01 deg, quantization negligible
+    m = adr.measure2(adr.simulate(), ch, _rng(1), 1000, ref=False)
+    assert np.mean(m["base_sd"]) == pytest.approx(0.01, rel=0.01)
+    e = ch.skew_uniform
+    assert m["skew"].min() >= -e and m["skew"].max() <= e
+    assert np.std(m["skew"]) == pytest.approx(e / math.sqrt(3), rel=0.08)
+    assert np.mean(m["phase"]) * ch.fs == pytest.approx(0.5, abs=0.03)
+    assert np.std(m["phase"]) * ch.fs == pytest.approx(1 / math.sqrt(12), rel=0.08)
+    m = adr.measure2(adr.simulate(), adr.Chain2(pivot=False), _rng(2), 1000, ref=False)
+    assert np.mean(m["mount_j"]) / adr.Q_REQ == pytest.approx(0.5, abs=0.03)
+
+
+def test_r2_ideal_two_channel_is_exact(tr10):
+    ch = adr.Chain2(k=adr.K_LO_CAP, q=1e-12, sigma_counts=0.0, lat=0.0)
+    m = adr.measure2(tr10, ch, _rng(3), 50)
+    assert np.max(np.abs(m["peak"] - tr10.peak)) < 1e-6
+    assert np.max(np.abs(m["ref_peak"] - tr10.peak)) < 1e-6
+
+
+def test_r2_joint_minus_pivot_within_two_counts(tr10):
+    m = adr.measure2(tr10, adr.Chain2(k=adr.K_LO_CAP, sigma_counts=0.0), _rng(4), 500, ref=False)
+    assert np.max(np.abs(m["peak"] - tr10.peak)) < 2 * adr.Q_REQ
+
+
+def test_r2_pivot_stuck_reads_joint_only(tr10):
+    """Pivot frozen from onset: forearm = joint channel = k * true drop."""
+    ch = adr.Chain2(k=adr.K_LO_CAP, sigma_counts=0.0, piv=adr.Fault("stuck", t=0.0))
+    m = adr.measure2(tr10, ch, _rng(5), 50, ref=False)
+    assert np.max(np.abs(m["peak"] - adr.K_LO_CAP * tr10.peak)) < 2 * adr.Q_REQ
+
+
+@pytest.mark.parametrize("chan", ["joint", "piv"])
+def test_r2_slip_underreads_by_step(tr10, chan):
+    f = adr.Fault("slip", size=0.2, t=0.05)
+    ch = adr.Chain2(k=adr.K_LO_CAP, sigma_counts=0.0, **{chan: f})
+    m = adr.measure2(tr10, ch, _rng(6), 50, ref=False)
+    assert np.max(np.abs(m["peak"] - (tr10.peak - 0.2))) < 2 * adr.Q_REQ
+
+
+def test_r2_backlash_underread_within_play(tr10):
+    b = 0.2
+    ch = adr.Chain2(pivot=False, q=1e-12, sigma_counts=0.0, joint=adr.Fault("backlash", size=b))
+    m = adr.measure2(tr10, ch, _rng(7), 300, ref=False)
+    under = tr10.peak - m["peak"]
+    assert under.min() >= -1e-9 and under.max() <= b + 1e-9
+    assert np.mean(under) == pytest.approx(b / 2, rel=0.15)
+
+
+def test_r2_drift_underread(tr10):
+    r = 0.2
+    ch = adr.Chain2(pivot=False, q=1e-12, sigma_counts=0.0, joint=adr.Fault("drift", size=r))
+    m = adr.measure2(tr10, ch, _rng(8), 20, ref=False)
+    # drift counted from the start of the baseline window; baseline is its mean
+    assert np.all(m["peak"] < tr10.peak - r * tr10.t_c * 0.9)
+
+
+def test_r2_longest_run():
+    c = np.array([[1, 1, 1, 2, 2, 3, 3, 3, 3, 4]])
+    post = np.ones_like(c, bool)
+    assert adr._longest_run(c, post)[0] == 3  # four equal values = three repeats
+    post[0, :6] = False  # only samples 6-9 count: 3, 3, 3, 4 -> two repeats
+    assert adr._longest_run(c, post)[0] == 2
+
+
+def test_r2_play_operator():
+    x = np.array([[0.0, 0.0, -1.0, -2.0, -1.0]])
+    rng = np.random.default_rng(0)
+    y = adr._play(x, 1.0, rng)
+    assert np.all(np.abs(y - x) <= 0.5 + 1e-12)
+    assert y[0, 3] == pytest.approx(-1.5)
+
+
+def test_r2_budget_one_channel_within_exact_sup():
+    r = adr.budget_two_channel(1.0, _rng(9), n=20000, pivot=False)
+    ex = adr.exact_single_channel(n_phase=201, n_mount=101)
+    assert r["t10_err_max_ms"] <= 0.14467 + 1e-4
+    assert ex["t10_abs_max_ms"] <= 0.14467 + 1e-4 and ex["t10_abs_max_ms"] > 0.14
+    assert ex["lattice_free_t10_ms"] == pytest.approx(
+        (adr.ENC_LAT_S + adr.TRIG_SKEW_S + adr.REL_SKEW_S + 1 / adr.FS_REQ) * 1e3
+        + adr.Q_REQ / adr.free_fall_points()["w10_dps"] * 1e3
+    )
+
+
+def test_r2_cp_interval():
+    lo, hi = adr._cp(105, 400)
+    assert lo < 105 / 400 < hi
+    assert adr._cp(0, 10)[0] == 0.0 and adr._cp(10, 10)[1] == 1.0
+
+
+def test_r2_committed_values():
+    R = json.loads((ROOT / "results" / "angle_detector_risk.json").read_text())
+    r2 = R["r2"]
+    b = r2["budget"]
+    assert b["one_channel"]["t10_ok"] and b["one_channel"]["d200_ok"]
+    assert b["two_ch_d200_fails"]  # joint - pivot fails PR #9's guard (FC round 1 item 12)
+    assert b["two_ch_worst_d200_deg"] < -adr.GUARD_DEG
+    assert r2["exact"]["t10_abs_max_ms"] <= adr.U_T_S * 1e3
+    assert r2["jp_peak_err"]["max"] < 2 * adr.Q_REQ and r2["jp_peak_err"]["min"] > -2 * adr.Q_REQ
+    assert r2["faults"]["pivot_stuck_onset"]["missed_base"]["p"] > 0.9
+    assert r2["pr9_head"].startswith("335d4e5")
