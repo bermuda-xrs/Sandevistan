@@ -353,6 +353,56 @@ def _need(d: dict) -> str:
     return s + f"; nct {d['nct'] if d['nct'] is not None else 'none'}"
 
 
+def _summary(D: dict, C: dict, T: dict) -> list[str]:
+    """Compact config x rise tables of the headline numbers (the long tables follow)."""
+    P, Q = LEADS
+    head = "| SD subject/session/trial | " + " | ".join(f"{r} ms rise" for r in RISES) + " | no detector |"
+    rule = "|---|" + "---|" * (len(RISES) + 1)
+
+    def short(k, m):
+        return f"{k / m:.3f}"
+
+    def need(d):
+        if not d["reachable"]:
+            return "not reachable"
+        if not (np.isfinite(d["n80"]) and d["n80"] <= max(N_GRID)):
+            return f"> {max(N_GRID)}"
+        return f"{d['n80']:.1f} ({_num(d['lo'])}–{_num(d['hi'])})"
+
+    L = []
+    for title, fn in (
+        (f"Power at {N_SUB} subjects, with bias (true lead {P} ms)",
+         lambda c, r: short(C[(c, r, P)]["raw"]["k"], C[(c, r, P)]["raw"]["m"])),
+        (f"Power at {N_SUB} subjects, bias removed (oracle)",
+         lambda c, r: short(C[(c, r, P)]["unb"]["k"], C[(c, r, P)]["unb"]["m"])),
+        (f"Subjects for {POWER_TARGET} power, with bias (95% CI)",
+         lambda c, r: need(C[(c, r, P)]["raw"]["need"])),
+        (f"Subjects for {POWER_TARGET} power, bias removed (95% CI)",
+         lambda c, r: need(C[(c, r, P)]["unb"]["need"])),
+        (f"False pass at {Q} ms, with bias (nominal 0.05)",
+         lambda c, r: short(C[(c, r, Q)]["raw"]["k"], C[(c, r, Q)]["raw"]["m"])),
+        (f"False pass at {Q} ms, bias removed (oracle)",
+         lambda c, r: short(C[(c, r, Q)]["unb"]["k"], C[(c, r, Q)]["unb"]["m"])),
+    ):
+        L += ["", f"### Summary: {title} (SYNTHETIC)", "", head, rule]
+        for c in D["configs"]:
+            c = tuple(c)
+            row = [fn(c, r) for r in RISES]
+            if "Power at" in title and "removed" in title:
+                tt = T[(c, P)]
+                row.append(short(tt["k"], tt["m"]))
+            elif "Subjects" in title and "removed" in title:
+                row.append(need(T[(c, P)]["need"]))
+            elif "False pass" in title and "removed" in title:
+                tt = T[(c, Q)]
+                row.append(short(tt["k"], tt["m"]))
+            else:
+                row.append("—")
+            name = cfg_name(c) + (" (design)" if c == DESIGN else "")
+            L.append(f"| {name} | " + " | ".join(row) + " |")
+    return L + [""]
+
+
 def cmd_report(a):
     D = json.loads(a.scored.read_text())
     C = {(tuple(D["configs"][c["cfg"]]), c["rise"], c["lead"]): c for c in D["cells"]}
@@ -382,6 +432,7 @@ def cmd_report(a):
         f"{r} ms {min(c['bias'] for c in D['cells'] if c['rise'] == r):+.2f} to "
         f"{max(c['bias'] for c in D['cells'] if c['rise'] == r):+.2f}" for r in RISES)
         + f" (all cells {min(b):+.2f} to {max(b):+.2f})."]
+    L += _summary(D, C, T)
     for c in D["configs"]:
         c = tuple(c)
         t, tn = T[(c, P)], T[(c, Q)]
