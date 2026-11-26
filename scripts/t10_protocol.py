@@ -81,9 +81,9 @@ PLAT_B = slice((PLAT.start + PLAT.stop) // 2, PLAT.stop)
 #   (5 % sensor noise), so 10 % keeps 2x headroom. The sample noise is not scaled: a run whose step is
 #   only about 10-20 baseline SDs can be INVALID on this check by noise alone (INVALID is not FAIL:
 #   repeat the run with more repeats). Measured on the synthetic chain, no assist-side change: 0/300
-#   INVALID at 10 % per-trial sensor noise, 42/300 at 20 % with 10 repeats and 6/300 with 20 repeats
-#   (work/fr.py, SYNTHETIC; 0/300 for both on the guard before this check). ASSUMPTION: the tolerance is
-#   an engineering choice.
+#   INVALID at 10 % per-trial sensor noise (FC's own draws: 1/300), 42/300 at 20 % with 10 repeats and
+#   6/300 (FC: 7/300) with 20 repeats (SYNTHETIC; 0/300 for all of them on the guard before this check).
+#   ASSUMPTION: the tolerance is an engineering choice.
 # TAIL: the 50 ms after the plateau window (T0 + 550 .. 600 ms, the end of the record). Its mean may differ
 #   from the plateau mean by at most SETTLE_TOL of the step (FC #10: a 60 % step at 551 ms was invisible).
 #   Synthetic runs: at most 0.082 of the step (ripple, as for the plateau halves). A change after T0 + 600 ms
