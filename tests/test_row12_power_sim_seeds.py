@@ -1,8 +1,9 @@
 """Seeding and variance components of scripts/row12_power_sim.py. Synthetic data only.
 
 The old row-12 generator seeded sessions with ``default_rng([seed, i, j])``. SeedSequence pads a seed
-list shorter than its 4-word pool with zeros, so session 0 reused the subject's stream (session-0
-offset = 0.75 x subject offset, subject-mean SD 10.57 ms instead of 8.91).
+list that converts to fewer 32-bit words (not list items) than its pool, 4 by default, with zeros. So
+session 0 reused the subject's stream (session-0 offset = 0.75 x subject offset, subject-mean SD
+10.55 ms in theory instead of 8.91).
 ``test_legacy_scheme_fails_the_check`` keeps that scheme as a negative control: the same check must
 reject it.
 """
@@ -83,7 +84,7 @@ def test_legacy_scheme_fails_the_check():
     bad = violations(vc)
     assert vc["corr_subject_session"][0] > 0.99  # session 0 reuses the subject stream
     assert any("corr(subject, session 0)" in b for b in bad)
-    assert any(b.startswith("sd_subject_mean") for b in bad)  # ~10.57 ms, not 8.91
+    assert any(b.startswith("sd_subject_mean") for b in bad)  # 10.55 ms in theory, not 8.91
 
 
 def test_seed_nodes_are_distinct():
