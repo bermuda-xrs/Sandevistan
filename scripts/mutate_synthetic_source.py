@@ -3,8 +3,8 @@
 Copies ``src`` and the test file to a temporary directory, breaks ``SyntheticSource`` in one way per
 mutant, runs the tests and prints which fail. Exits 1 if the unmutated copy fails, if a mutant gets
 through, or if a test never fails. M0 is the seeding before #7. M5 and M7 reuse a stream with an
-offset; M3, M8 and M18 reuse streams across seeds; M9-M15, M17 and M18 touch only the gain, onset or noise
-draws.
+offset; M3, M8, M18 and M19-M21 reuse streams across seeds; M9-M15, M17 and M18 touch only the gain, onset or
+noise draws. M19-M21 are Fact Checker's PR #8 mutants N1, N2 and N8.
 
 Usage (repo root):  python scripts/mutate_synthetic_source.py [--out out.md]     (a few minutes, 1 process)
 """
@@ -104,6 +104,12 @@ MUTANTS: dict[str, list[tuple[str, str]] | str] = {
     "M17 EMG noise SD 1.05": [(EMG, EMG.replace("(0, 1,", "(0, 1.05,"))],
     "M18 onset time ignores the seed (cross-seed reuse)": [
         (ONSET, ONSET.replace("rng.", "np.random.default_rng([s, ss, t, 9])."))],
+    "M19 subject tree rooted at seed + 8 x subject (cross-seed, stride 8)": [
+        (ROOT_SS, "[np.random.SeedSequence(self.seed + 8 * k) for k in range(self.n_subjects)]")],
+    "M20 subject tree rooted at seed + 64 x subject (cross-seed, stride 64)": [
+        (ROOT_SS, "[np.random.SeedSequence(self.seed + 64 * k) for k in range(self.n_subjects)]")],
+    "M21 seed reduced modulo 10**6 (cross-seed)": [
+        (ROOT_SS, ROOT_SS.replace("self.seed", "self.seed % 10**6"))],
 }
 HEAD = "    def __iter__(self) -> Iterator[Trial]:\n"
 TAIL = "    def _trial(self, rng, s, ss, t, offset_ms, gain) -> Trial:\n"

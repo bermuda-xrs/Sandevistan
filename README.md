@@ -139,8 +139,14 @@ Values at this checkout (synthetic):
 
 The 4.00 ms in `tests/test_harness.py` is the same bias at 8x3x5, seeds 0-5: -3.996 ms, 95% CI
 [-4.258, -3.734]. Those 720 trials are a subset of the 2880 in the 16x3x10 study. They differ from
-the other 2160 by -0.092 ms [-0.469, +0.284] (paired over 6 seeds, p = 0.556), so no difference is
-shown: 3.9 and 4.00 are one bias read at two sample sizes (synthetic;
+the other 2160 (2159 detected) by -0.092 ms [-0.469, +0.284] (paired over 6 seeds, p = 0.556), so no
+difference is shown: 3.9 and 4.00 are one bias read at two sample sizes. The interval of the
+difference is 0.75 ms wide, so a difference as small as 0.07 ms is not excluded either.
+
+One of the 2880 trials is missed and left out of every 16x3x10 number here, including those of
+`bias_guard_band.py`: seed 1, S11-D3 T02, rejected by the EMG baseline-rest check. It is not one of the
+8x3x5 trials. Its subject mean uses 29 of 30 trials. Leaving out its whole session or its whole
+subject instead moves the bias over seeds from -3.927 to -3.918 or -3.923 ms (synthetic;
 `scripts/synthetic_source_spread.py`, part 5).
 
 These replace the stale base-608a151 values (bias +0.35 ms, u = 0.17 ms), and the values from before
@@ -215,7 +221,9 @@ list items) than its 4-word pool with zeros, so those were the same stream: sess
 
 In theory it is 10.55 ms with the old seeding and 8.91 ms with independent streams.
 `tests/test_synthetic_source_seeds.py` guards this: no raw word of any stream is used twice, at any
-offset, within a seed or across the 9 seeds it checks, and the gain, onset and noise draws are checked too.
+offset, within a seed or across the 12 seeds it checks (neighbouring seeds, strides 8 and 64, seeds equal
+modulo 2**32 or 10**6; reuse with seeds outside that list is not checked), and the gain, onset and noise
+draws are checked too.
 `scripts/mutate_synthetic_source.py` breaks the source and shows that each of those tests can fail.
 
 **Seeded outputs from before #7 do not reproduce.** Every `SyntheticSource` and `MinJerkSource` trial is a

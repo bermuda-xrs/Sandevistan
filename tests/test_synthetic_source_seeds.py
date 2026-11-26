@@ -10,8 +10,10 @@ Two kinds of check:
 - **Streams** (``_record``). Every generator the source makes is replaced by one that remembers where
   its stream started and how many values it handed out. Two streams overlap if any raw 64-bit word
   they consume is the same, so a stream reused with an offset is caught, not only one restarted from
-  its first draw. Seeds are pooled, so reuse across seeds is caught too. The number of values handed
-  out must equal the number in the trials, so a draw that bypasses the recorded generators fails.
+  its first draw. The ``STREAM_SEEDS`` are pooled, so reuse between any two of them is caught too:
+  neighbouring seeds, strides 8 and 64, seeds equal modulo 2**32 or 10**6. Reuse between seeds outside
+  that list is not checked. The number of values handed out must equal the number in the trials, so a
+  draw that bypasses the recorded generators fails (but see ``test_every_draw_comes_from_a_recorded_stream``).
 - **Outputs** (``_draws``). The subject, session and trial offsets, the gain, the onset time, the EMG
   noise and the angle noise are read back from the trials.
 
@@ -30,8 +32,10 @@ N_SEEDS, N_SUBJ, N_SESS, N_TRIALS = 64, 16, 3, 10
 SHORT = dict(duration_s=0.01, fs_emg=200.0, fs_imu=150.0)  # 2 EMG and 2 angle samples
 NOISY = dict(duration_s=0.1, fs_emg=200.0, fs_imu=150.0)  # 20 EMG and 15 angle samples, all before the onset
 SOURCES = [SyntheticSource, MinJerkSource]
-# Consecutive seeds (a tree rooted at seed + subject), and seeds equal modulo 2**32 (a truncated seed).
-STREAM_SEEDS = [0, 1, 2, 3, 7, 2**32 - 1, 2**32, 2**32 + 1, 2**40]
+# Pairs that a seed-mixing bug would map onto each other: consecutive seeds (a tree rooted at seed +
+# subject), strides 8 and 64 (0 and 8, 0 and 64), seeds equal modulo 2**32 (a truncated seed) and
+# modulo 10**6. Cross-seed reuse is checked only between seeds in this list.
+STREAM_SEEDS = [0, 1, 2, 3, 7, 8, 64, 10**6, 2**32 - 1, 2**32, 2**32 + 1, 2**40]
 
 
 class _Recorder(np.random.Generator):
@@ -176,11 +180,25 @@ def test_no_stream_overlaps_another_within_or_across_seeds(cls, monkeypatch):
 @pytest.mark.parametrize("cls", SOURCES)
 def test_every_draw_comes_from_a_recorded_stream(cls, monkeypatch):
     """The overlap check sees every draw: 1 per subject, 2 per session (offset, gain), and per trial 2
-    (jitter, onset) plus one per EMG and angle sample."""
+    (jitter, onset) plus one per EMG and angle sample.
+
+    This test is deliberately brittle. It counts only values drawn with ``normal`` or ``uniform`` from
+    generators made by ``np.random.default_rng``, so it also fails for a correct change that
+    - builds generators another way (``np.random.Generator(np.random.PCG64(seed))``, a spawned
+      ``SeedSequence`` passed to ``Generator``), or
+    - draws with another method (``standard_normal``, ``random``, ``integers``), or
+    - draws a different number of values (a new noise channel, a new per-trial parameter).
+    That is accepted, because it is the only guard against draws that bypass the recorded
+    generators: a deep-copied generator (``copy.deepcopy(rng)``) reuses words that the overlap test
+    never sees. After such a change, route the new generators through ``np.random.default_rng``, add
+    the new draw method to ``_Recorder``, or update the expected count here, and rerun
+    ``scripts/mutate_synthetic_source.py``.
+    """
     made, trials = _record(cls, 0, monkeypatch)
     n_samples = sum(t.emg.size + t.angle_or_imu.size for t in trials)
     want = N_SUBJ + 2 * N_SUBJ * N_SESS + 2 * N_SUBJ * N_SESS * N_TRIALS + n_samples
-    assert sum(r.n_values for r in made) == want
+    got = sum(r.n_values for r in made)
+    assert got == want, f"{got} recorded draws, {want} expected: see this test's docstring"
 
 
 @pytest.mark.parametrize("cls", SOURCES)

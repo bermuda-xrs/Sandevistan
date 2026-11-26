@@ -13,7 +13,9 @@ Then, at this checkout only, with the detectors at default settings:
      and of the planned 16x3x10 study, seed 0.
   5. the lead bias at that 8x3x5 size and at the planned 16x3x10 (seeds 0-5), and whether they differ.
      The 8x3x5 trials are a subset of the 16x3x10 trials (a trial does not depend on the study size;
-     asserted here), so the subset is compared with the remaining trials.
+     asserted here), so the subset is compared with the remaining trials. Missed trials (NaN lead) are
+     excluded, as in bias_guard_band.py; each one is listed with the reason, and the bias is recomputed
+     with its whole session or whole subject left out instead, to show what the exclusion changes.
 The in-family bias and guard band come from ``scripts/bias_guard_band.py``.
 
 Usage (repo root):  python scripts/synthetic_source_spread.py [--pool-seeds 40] [--out out.md]
@@ -32,7 +34,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from emg_onset_lead import (  # noqa: E402
     PLANNED_SHAPE,
+    EmgOnsetDetector,
+    EmgParams,
     Harness,
+    ImuOnsetDetector,
+    ImuParams,
     LatencyConfig,
     LeadStats,
     SampleSize,
@@ -96,10 +102,13 @@ def bias_by_size() -> dict:
     Mean of the per-trial errors; CIs are t intervals over the 6 seed means.
     """
     n_subj, n_sess = PLANNED_SHAPE
-    inner, outer, full, planned = [], [], [], []
+    inner, outer, full, planned, misses = [], [], [], [], []
     for seed in range(6):
-        res = Harness.run(SyntheticSource(n_subjects=n_subj, n_sessions=n_sess, n_trials=N_TRIALS, seed=seed))
+        src = SyntheticSource(n_subjects=n_subj, n_sessions=n_sess, n_trials=N_TRIALS, seed=seed)
+        res = Harness.run(src)
         e = np.array([r.lead_ms - r.true_lead_ms for r in res]).reshape(n_subj, n_sess, N_TRIALS)
+        for s, ss, k in zip(*np.nonzero(np.isnan(e))):
+            misses.append(miss_detail(src, res, seed, e, int(s), int(ss), int(k)))
         mask = np.zeros_like(e, bool)
         mask[:8, :, :5] = True
         small = Harness.run(SyntheticSource(n_subjects=8, n_sessions=3, n_trials=5, seed=seed))
@@ -114,13 +123,43 @@ def bias_by_size() -> dict:
         h = stats.t.ppf(0.975, x.size - 1) * x.std(ddof=1) / np.sqrt(x.size)
         return float(x.mean()), float(x.mean() - h), float(x.mean() + h)
 
+    planned_alt = {"session": list(planned), "subject": list(planned)}
+    for m in misses:
+        for k in planned_alt:
+            planned_alt[k][m["seed"]] = m["bias_without_" + k]
     m_in, m_out, m_full = ([np.nanmean(x) for x in part] for part in (inner, outer, full))
     diff = np.array(m_in) - np.array(m_out)
     return dict(inner=ci(m_in), outer=ci(m_out), full=ci(m_full), planned=ci(planned), diff=ci(diff),
                 p=float(stats.ttest_1samp(diff, 0.0).pvalue),
                 n_inner=sum(x.size for x in inner), n_outer=sum(x.size for x in outer),
-                missed=int(sum(np.isnan(x).sum() for x in full)),
+                missed=int(sum(np.isnan(x).sum() for x in full)), misses=misses,
+                n_outer_detected=int(sum(np.isfinite(x).sum() for x in outer)),
+                planned_without_session=ci(planned_alt["session"]),
+                planned_without_subject=ci(planned_alt["subject"]),
                 pooled_inner=float(np.nanmean(np.concatenate(inner))))
+
+
+def miss_detail(src, res, seed, e, s, ss, k) -> dict:
+    """Why one trial has no lead; that seed's bias (mean of subject means) without its session or subject."""
+    i = (s * src.n_sessions + ss) * src.n_trials + k
+    t = next(x for j, x in enumerate(src) if j == i)
+    r = res[i]
+    assert (r.subject_id, r.session_id, r.trial_id) == (t.subject_id, t.session_id, t.trial_id)
+    # Same detector calls as Harness.run (default parameters, 50 ms chunks).
+    emg = EmgOnsetDetector.run(t.emg, t.fs_emg, EmgParams(), max(1, round(0.05 * t.fs_emg)))
+    imu = ImuOnsetDetector.run(t.angle_or_imu, t.fs_imu, ImuParams(), max(1, round(0.05 * t.fs_imu)))
+    sess = np.nanmean(e, axis=2)
+    keep = np.ones(sess.shape, bool)
+    keep[s, ss] = False
+    subj_wo_sess = np.array([sess[a][keep[a]].mean() for a in range(sess.shape[0])])
+    return dict(seed=seed, trial=f"{r.subject_id} {r.session_id} {r.trial_id}",
+                in_8x3x5=bool(s < 8 and k < 5),
+                emg_rest_ok=emg.baseline_rest_ok, imu_rest_ok=imu.baseline_rest_ok,
+                emg_onset=emg.onset_s is not None, imu_onset=imu.onset_s is not None,
+                true_lead_ms=float(r.true_lead_ms), bias_with=float(sess.mean()),
+                bias_without_session=float(subj_wo_sess.mean()),
+                bias_without_subject=float(np.delete(sess.mean(axis=1), s).mean()),
+                subject_mean_n=int(np.isfinite(e[s]).sum()))
 
 
 def delay(n_subj: int, n_sess: int, n_trials: int) -> dict:
@@ -167,7 +206,21 @@ def report(pool_seeds: int) -> str:
         m, lo, hi = b[key]
         L.append(f"| {name} | {n if n else ''} | {m:+.3f} | [{lo:+.3f}, {hi:+.3f}] |")
     L += ["", f"t test of the difference over 6 seeds: p = {b['p']:.3f}. 8x3x5 pooled over trials "
-          f"{b['pooled_inner']:+.3f} ms. Missed trials: {b['missed']}."]
+          f"{b['pooled_inner']:+.3f} ms. Missed trials: {b['missed']} "
+          f"(the other trials: {b['n_outer_detected']} of {b['n_outer']} detected).", ""]
+    for m in b["misses"]:
+        L.append(f"- Missed: seed {m['seed']}, {m['trial']} (true lead {m['true_lead_ms']:.2f} ms; in 8x3x5: "
+                 f"{m['in_8x3x5']}). EMG rest OK {m['emg_rest_ok']}, IMU rest OK {m['imu_rest_ok']}, "
+                 f"EMG onset found {m['emg_onset']}, IMU onset found {m['imu_onset']}. Its subject mean uses "
+                 f"{m['subject_mean_n']} of 30 trials. Seed {m['seed']} bias {m['bias_with']:+.4f} ms with "
+                 f"the "
+                 f"trial left out; {m['bias_without_session']:+.4f} without its session; "
+                 f"{m['bias_without_subject']:+.4f} without its subject.")
+    for k in ("session", "subject"):
+        m, lo, hi = b["planned_without_" + k]
+        L.append(f"- 16x3x10 bias over seeds with the missed trial's whole {k} left out instead: {m:+.4f} ms "
+                 f"[{lo:+.4f}, {hi:+.4f}] (as excluded: {b['planned'][0]:+.4f} [{b['planned'][1]:+.4f}, "
+                 f"{b['planned'][2]:+.4f}]).")
     return "\n".join(L) + "\n"
 
 
