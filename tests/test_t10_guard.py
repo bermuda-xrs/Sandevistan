@@ -91,6 +91,91 @@ def test_two_stage_late_response_not_passed():
     assert 0 < r["t50"] < 25
 
 
+# ---- FC round 2 (#10-#13): what still slipped past the first guard -------------------------------------
+def step_at(at_ms, size=1.0):
+    return size * (tm >= T0 + at_ms / 1e3)
+
+
+def test_late_change_after_plateau_window_invalid():
+    # FC #10: 40 % at 20 ms, the other 60 % at 560 ms (after the 350-550 ms plateau window, in the record).
+    # True t50 is 560 ms; the plateau sees only the first 40 %, so t50 read 20.5 ms and PASSED.
+    r = t10.assist_arrived(run(step_at(20, 0.8) + step_at(560, 1.2), noise_sd=0.02))
+    check_invalid(r, "after T0+550")
+    assert 0 < r["t50"] < 25
+
+
+def test_late_change_just_over_tolerance_invalid():
+    # 20 % of the total arriving after the plateau window: tail 0.2 of the step, over SETTLE_TOL 0.15
+    r = t10.assist_arrived(run(step_at(20, 0.8) + step_at(560, 0.2)))
+    check_invalid(r, "after T0+550")
+
+
+def test_late_pulse_inside_tail_window_invalid():
+    # a +0.5 pulse from 560 to 590 ms that is gone again by 590 ms: only the whole 550-600 ms window sees it
+    pulse = 0.5 * ((tm >= T0 + 0.56) & (tm < T0 + 0.59))
+    r = t10.assist_arrived(run(step_at(20) + pulse))
+    check_invalid(r, "after T0+550")
+
+
+def test_dip_before_T0_invalid():
+    # a dip of -0.3 of the step ending on the T0 sample: the offset counts in both directions
+    dip = -0.3 * ((tm >= T0 - 0.03) & (tm < T0 + 0.01))
+    r = t10.assist_arrived(run(step_at(20) + dip, noise_sd=0.005))
+    check_invalid(r, "T0 sample")
+    assert r["start_offset"] < 0
+
+
+def test_small_late_change_still_valid():
+    # 10 % of the total arriving after the plateau window is inside SETTLE_TOL (pins it from above)
+    r = t10.assist_arrived(run(step_at(20, 0.9) + step_at(560, 0.1)))
+    assert r["status"] == "PASS" and r["reasons"] == []
+
+
+def test_rise_before_T0_invalid():
+    # FC #13: torque starts 30 ms before T0 (ramp -30/100). It is 0.28 of the step on the T0 sample.
+    r = t10.assist_arrived(run(ramp(-30, 100), noise_sd=0.01))
+    check_invalid(r, "T0 sample")
+    assert r["t50"] == pytest.approx(21.0, abs=1.0)
+
+
+def test_small_rise_before_T0_still_valid():
+    r = t10.assist_arrived(run(ramp(-5, 100), noise_sd=0.01))  # 0.05 of the step on the T0 sample
+    assert r["status"] == "PASS" and r["reasons"] == []
+
+
+def test_single_sample_spike_invalid():
+    # FC #12: slow ramp (150 ms delay, 150 ms rise, true t50 225 ms) + a spike of 8x the step on 1 sample of
+    # 1 repeat at 10 ms. The mean is 0.8 of the step there, so the first crossing was 10.0 ms and PASSED.
+    x = run(ramp(150, 150), noise_sd=0.01)
+    x[0, int(round((T0 + 0.01) * t10.FS))] = 8.0
+    r = t10.assist_arrived(x)
+    check_invalid(r, "does not hold")
+    assert r["t50"] == pytest.approx(10.0)
+
+
+def test_noisy_valid_step_not_rejected_by_crossing_check():
+    # per-trial sensor noise 0.1 of the step, seed 15: the first crossing is early, noise only (pins
+    # CONFIRM_LEVEL from above: a level of 1.0 makes this run INVALID)
+    r = t10.assist_arrived(run(ramp(20, 100), noise_sd=0.1, seed=15))
+    assert r["status"] == "PASS" and r["reasons"] == []
+
+
+@pytest.mark.parametrize("kind, seed", [("independent", 218), ("common", 760)])
+def test_random_walk_noise_not_passed(kind, seed):
+    # FC #11: no assist, noise is a random walk (outside the Gaussian assumption). These two draws PASSED the
+    # first guard (t50 49.0 and 77.0 ms); both are already off their baseline on the T0 sample.
+    if kind == "independent":  # FC section E: cumulative sum of N(0,1) in every repeat, seed 1000 + i
+        g = np.random.default_rng(1000 + seed)
+        x = np.cumsum(g.standard_normal((REPS, tm.size)), axis=1)
+    else:  # FC: the same random walk (x 0.05) in every repeat plus 0.001 noise, seed 5000 + i
+        g = np.random.default_rng(5000 + seed)
+        w = np.cumsum(g.standard_normal(tm.size)) * 0.05
+        x = np.tile(w, (REPS, 1)) + g.standard_normal((REPS, tm.size)) * 0.001
+    r = t10.assist_arrived(x)
+    assert r["passed"] is False and r["status"] == "INVALID"
+    check_invalid(r, "T0 sample")
+
+
 # ---- normal behaviour unchanged ----------------------------------------------------------------------------
 @pytest.mark.parametrize(
     "delay, rise, t50, status",

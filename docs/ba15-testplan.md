@@ -160,10 +160,11 @@ B-A15 is the project's human catch model: the user arrests the arm at exactly 20
 1. One test cell only: e-stop fault, ramp 21.00 N·m/s, STO 148 ms, relaxed hold. It has the earliest model crossing, so a given catch time is hardest to pass there (ASSUMPTION: a subject's catch time does not depend on which path failed). **A pass covers only the cell tested.** To claim each path separately, each needs its own full sample.
 2. Seat the subject, elbow at 90°, payload in hand, forearm resting on the start latch. A relaxed arm would sag before the fault, because the device carries slightly less than the arm's weight, so the latch must hold it and release at fault onset (ASSUMPTION: release adds no usable cue).
 3. Tell the subject to relax and to stop the arm only if it falls. Use no countdown and mask sound.
-4. Random wait of 1 to 4 s before onset, as in [PRU09]. Mix in sham releases (latch opens, no fault) at random, one sham per fault trial (ASSUMPTION). A relaxed arm still sags slowly in a sham, so shams are never scored.
+4. Random wait of 1 to 4 s before onset, as in [PRU09]. A sham is a release where the latch opens and no fault follows. Sham scheduling is fixed before trial 1 (ASSUMPTION, a design choice, not a computed number): before the session each subject is randomised, with equal chance, to one of two schedules, **fault only** (the fault is the subject's first release) or **one sham, then the fault**. A sham is always before the fault, never after it. The subject is not told how many releases to expect or in which order. A relaxed arm still sags slowly in a sham, so shams are never scored.
 5. Fault onset is time zero. The catch time is from onset to arrest complete (arm speed zero), as in Rev U row 14.
-6. **One fault trial per subject** (Charlie's design), with the shams mixed in before and after it. Then the subject's session ends.
+6. **One fault trial per subject** (Charlie's design). The session ends right after the fault trial and the check on the subject, so nothing is released after it: no sham follows the fault trial.
 7. No practice with the real fault. The unprepared user is the hazard, and [PRU09] subjects were practised. With one fault trial per subject, every fault is a first exposure.
+8. **Re-running an INVALID trial** (this keeps the one-fault rule and the first-exposure basis). A trial found INVALID **before** the release, when nothing was released, may be restarted on the same subject, who is still unexposed. An INVALID **fault** trial where the latch was released is **not repeated on that subject**: a second fault would not be a first exposure and would make that subject two trials, which the ICC-free basis of section 4 does not cover. The subject is closed, the trial is not counted, and a new subject is enrolled in their place, so that the plan ends with 59 valid first-exposure fault trials. An INVALID sham is not repeated and the subject goes on to the fault. Every INVALID trial and every replacement is reported. The replacement is not chosen after seeing the angle trace, because INVALID is decided without it (see the score rules). A drop in an INVALID trial is not removed: the stop rules and the zero-drop failure rule still apply.
 
 **Trial score (fixed before trial 1).** Let t_c be the measured catch time and U_t the measured timing uncertainty.
 
@@ -175,7 +176,7 @@ B-A15 is the project's human catch model: the user arrests the arm at exactly 20
 
 - Using both time and angle makes the score stricter than either alone, so a pass holds for both readings of "drop past 10°" (ASSUMPTION: this is how 1a and 2b combine; for FC and Charlie to confirm).
 - Not relaxed means the repo EMG onset detector, at its unchanged defaults, fires during the wait (ASSUMPTION).
-- INVALID is decided from pre-onset and rig channels only, by someone who has not seen the angle trace after onset. Invalid trials are repeated and all are reported. **A drop in an invalid trial still triggers the stop rules.**
+- INVALID is decided from pre-onset and rig channels only, by someone who has not seen the angle trace after onset. An INVALID trial is not counted. It is re-run or replaced as in Phase B step 8, never repeated as a second fault on the same subject, and all are reported. **A drop in an invalid trial still triggers the stop rules.**
 - The rig may not be easier than the cell. Going past it by one percent in ramp rate moves the crossing -0.39 ms, and STO one ms early moves it -0.29 ms (SYNTHETIC). The allowed overshoot is open.
 
 ## 4. Sample size
@@ -337,7 +338,7 @@ Rejected clustered designs, subjects inflated for the ICC (m = 10). "Best case" 
 
 | Group | Channels |
 |---|---|
-| Identity | coded subject, session, trial number, fault or sham, random wait, test cell, operator, firmware commit, plan version |
+| Identity | coded subject, session, trial number, fault or sham, assigned sham schedule, random wait, test cell, operator, firmware commit, plan version |
 | Commands | ramp rate and STO time commanded **and measured as delivered** (firmware test mode), fault-onset trigger, latch-release time |
 | Torque | commanded and measured joint torque (device side), arm-side torque at the cuff, k used, torque-trip state |
 | Hold | latch load before release (arm side), payload mass, subject arm mass estimate |
@@ -364,7 +365,7 @@ All rig channels are logged at 15 kHz or faster (the budget in section 3; one sa
 | A8 | Testing only the governing cell is enough; catch time does not depend on the path |
 | A9 | Score combines catch time and angle, with uncertainty added against a pass |
 | A10 | Subject gravity moment known to ±5 % (HE scoping) |
-| A11 | Latch release and shams give no usable cue; one sham per fault trial |
+| A11 | Latch release and shams give no usable cue. Weaker under 59 × one: with the sham-then-fault schedule a subject who works out that the second release is real is prepared, which (ASSUMPTION) makes a drop less likely and so favours a false pass. Not tested; open item 9 |
 | A12 | "Relaxed" means the EMG onset detector at unchanged defaults stays silent |
 | A13 | (SYNTHETIC) FC's 20 %–33 %: linear extrapolation of [PRU09], normal catch times, SD 16 ms, ± read as SD |
 | A14 | [PRU09] transfers to this task (step torque, horizontal plane, practised subjects there; ramp, vertical, unprepared here) |
@@ -384,7 +385,8 @@ All rig channels are logged at 15 kHz or faster (the budget in section 3; one sa
 5. HE: allowed ramp and STO overshoot on the rig; latch design and whether the release skew can be met; absorber proof on the dummy; bandwidth for the torque and force channels. Rev U row 14 still says the window is recomputed per hold torque and asks for 10 trials per subject; both differ from Charlie's decisions.
 6. HE / firmware: **the test mode (A19) must be verified**: ramp 21.00 N·m/s and STO 148 ms delivered as set, fault path unchanged.
 7. Before Phase B: name the stop holder (IRB protocol) and fit the subject stop button.
-8. IRB: criteria, consent, adverse events, rest times, sham ratio.
+8. IRB: criteria, consent (what the subject is told about releases), adverse events, rest times, sham ratio.
+9. Charlie / FC: sham schedule (Phase B step 4) and its cue risk (A11). Zero shams (every subject fault-only) is the other option: it removes the sham cue. Outcomes by schedule are reported descriptively; they do not change the pass rule. Not decided here.
 
 ## References
 
