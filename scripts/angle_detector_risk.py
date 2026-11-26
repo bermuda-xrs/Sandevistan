@@ -1,7 +1,7 @@
 """Angle-detector risk for the B-A15 / B9 "drop past 10 deg" score. ALL NUMBERS ARE SYNTHETIC.
 
 The "angle detector" is the joint-angle chain that turns a physical arm drop into the B-A15 trial
-score (PR #9, docs/ba15-testplan.md @ 58cce8d, section 3 and "Trial score"):
+score (PR #9, docs/ba15-testplan.md @ 335d4e5, section 3 and "Trial score"):
 angle sensor -> sampling -> zero reference -> peak drop / 10 deg crossing / catch time -> timestamps
 against fault onset -> DROP / NO DROP. A missed detection is a false pass of the B9 safety test; a
 false trip is a spurious DROP, and under the zero-drop rule (0 in 59) one spurious DROP fails the test.
@@ -37,7 +37,8 @@ TEMPLATE = ROOT / "scripts" / "angle_detector_risk.template.md"
 DOC = ROOT / "docs" / "angle_detector_risk.md"
 
 # ---------------------------------------------------------------- inputs (quoted, not re-derived)
-# Drop model: PR #9 scripts/ba15_numcheck.py @ 58cce8d (Hardware Engineer's model; exo/ is not in repo).
+# Drop model: PR #9 scripts/ba15_numcheck.py @ 335d4e5 (inputs identical at 58cce8d; round 1 cited that).
+# It is Hardware Engineer's model; exo/ is not in this repo.
 ARM = dict(
     m_body=80.0,
     f_fa=0.016,
@@ -63,7 +64,8 @@ CATCH_MS = 200.0  # B-A15
 GOV = dict(t_det=0.0, rate=21.0, sto=0.148, hold=0.0)
 WINDOW_LO_S = 0.20190  # decided lower edge (Charlie 1a, PR #9), s
 
-# PR #9 measurement requirements (docs/ba15_numbers.json syn.hw.budget @ 58cce8d), quoted as inputs
+# PR #9 measurement requirements (docs/ba15_numbers.json syn.hw.budget @ 335d4e5, identical at 58cce8d),
+# quoted as inputs
 FS_REQ = 15000.0  # Hz
 BITS_REQ = 17
 Q_REQ = 360.0 / 2**BITS_REQ  # deg
