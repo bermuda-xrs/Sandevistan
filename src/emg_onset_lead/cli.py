@@ -5,6 +5,7 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 
+from .detect import EmgOnsetDetector, ImuOnsetDetector
 from .harness import Harness
 from .latency import LatencyConfig
 from .sources import DEFAULT_FS_EMG, DEFAULT_FS_IMU, SyntheticSource, check_rate
@@ -47,6 +48,10 @@ def main(argv=None) -> int:
 
     try:
         fs_emg, fs_imu = check_rate("--fs-emg", a.fs_emg), check_rate("--fs-imu", a.fs_imu)
+        # Build the default detectors once so a rate too low for the EMG band (below ~44.4 Hz) or
+        # the IMU smoothing (at or below 20 Hz) is an argparse error here, not a traceback mid-run.
+        EmgOnsetDetector(fs_emg)
+        ImuOnsetDetector(fs_imu)
     except ValueError as exc:
         p.error(str(exc))
 

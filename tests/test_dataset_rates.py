@@ -6,9 +6,10 @@ and Rojas-Martinez et al. 2020 records HD-EMG at 2048 Hz. The harness must run a
 the same lead accuracy, and the defaults must not move.
 
 Measured (SYNTHETIC, 16 seeds x 72 trials, paired against 2000/150 Hz, both sources): mean lead-error
-shift at most 0.14 ms at 1000/125, 2048/125, 2000/125 and 1000/150 Hz, every 95% interval containing 0;
-per-trial SD 3-17% larger; one missed trial of 1152 at every rate. The common offset of about -4 ms is the
-known smoothstep-burst bias (``SMOOTHSTEP_LEAD_BIAS_MS``), not a rate effect.
+shift at most 0.17 ms at 1000/125, 2048/125, 2000/125 and 1000/150 Hz, every 95% interval containing 0;
+per-trial SD changed by -1.0% to +6.6%; no missed trials (``scripts/dataset_rates_check.py``). The
+common offset of about -4 ms is the known smoothstep-burst bias (``SMOOTHSTEP_LEAD_BIAS_MS``), not a
+rate effect.
 """
 
 import json
@@ -68,7 +69,7 @@ def test_lead_accuracy_at_dataset_rates(cls, fs_emg, fs_imu):
     assert missed == 0
     lo, hi = SMOOTHSTEP_LEAD_BIAS_MS
     assert lo < err.mean() < hi  # same known shape bias as at 2000/150 Hz
-    assert err.std(ddof=1) < 6.0  # 3.4-3.7 ms measured; 2000/150 Hz gives 3.1-3.2
+    assert err.std(ddof=1) < 6.0  # 3.08-3.79 ms measured; 2000/150 Hz gives 3.27-3.38
 
 
 @pytest.mark.parametrize("fs", [0.0, -1000.0, float("nan"), float("inf")])
@@ -113,3 +114,21 @@ def test_cli_rejects_bad_rates(tmp_path, flag, value):
         main(["run", "--synthetic", "--subjects", "1", "--sessions", "1", "--trials", "1",
               flag, value, "--out", str(tmp_path)])
     assert exc.value.code == 2
+
+
+@pytest.mark.parametrize(("flag", "value", "msg"), [
+    ("--fs-imu", "20", "Nyquist"),  # 10 Hz smoothing at exactly Nyquist
+    ("--fs-imu", "10", "Nyquist"),
+    ("--fs-imu", "5", "Nyquist"),
+    ("--fs-emg", "44", "EMG band"),  # 0.45 * 44 = 19.8 Hz, below the 20 Hz lower edge
+])
+def test_cli_rates_too_low_for_filters_are_argparse_errors(tmp_path, capsys, flag, value, msg):
+    # Finite and > 0, but the default detectors cannot be built: exit 2 with the reason, no traceback,
+    # and nothing written.
+    with pytest.raises(SystemExit) as exc:
+        main(["run", "--synthetic", "--subjects", "1", "--sessions", "1", "--trials", "1",
+              flag, value, "--out", str(tmp_path / "o")])
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert msg in err and "Traceback" not in err
+    assert not (tmp_path / "o").exists()
