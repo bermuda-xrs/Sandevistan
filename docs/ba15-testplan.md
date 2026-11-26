@@ -63,7 +63,7 @@ B-A15 is the project's human catch model: the user arrests the arm at exactly 20
   - The absorber above is sized for the rig, not for a person.
   - In Phase B an uncaught arm reaches the stop at 211 °/s in the test cell (SYNTHETIC). In the runaway case it is 342 °/s, with 84.4 N·m and 422 N at the contact (SYNTHETIC).
   - With the S7 catch model (normal, SD 16 ms), the share of Phase B trials whose catch comes after the test cell's stop contact is 4.34 % (nominal-hold mean) to 6.69 % (zero-hold mean) (SYNTHETIC). FC's 4.53 %–6.96 % uses the earliest contact of any cell (SYNTHETIC).
-  - The stop rules halt at the first DROP, so at most one person hits the stop. But that person still takes it: the chance that the study ends on a stop contact is 9.05 % to 11.86 % (SYNTHETIC).
+  - The stop rules halt at the first DROP, so at most one person hits the stop. But that person still takes it: the chance that the study ends on a stop contact is 9.05 % to 11.86 % when a drop is a catch time later than the window edge, and 8.97 % to 11.77 % when the edge is lowered by U_t, as the DROP rule in section 3 does (SYNTHETIC). Both assume exactly 59 released fault trials: every released INVALID fault trial that step 8 of Phase B replaces with a new subject adds one more exposure that can end on a stop contact.
   - **No sourced limit exists in this plan.** FC notes that ISO/TS 15066 has body-region limits but holds no clause text (`PR9_verdict.md` row 12); the S7 search could not read it either. No other source was found. **No limit is invented here.**
   - **Phase B is blocked until** a sourced human tolerance for this contact (speed, force or energy at the forearm) is in the plan, and the stop is shown on the dummy to stay within it.
 
@@ -201,7 +201,7 @@ B-A15 is the project's human catch model: the user arrests the arm at exactly 20
 
 ## 4b. Rejected alternatives
 
-**33 subjects × 10 fault trials (the earlier planning default, DE 5.5, 330 fault trials). Rejected by Charlie, 2026-11-26.** Reasons:
+**33 subjects × 10 fault trials (the earlier planning default, DE 5.5, 330 fault trials). Not chosen: Charlie chose 59 × one (2026-11-26 01:25 KST, relayed by Seren; the rejection of this default is read from that choice, not a separate statement).** Reasons:
 1. **It is only valid if the drop ICC is at most 0.5, and that ICC must be fixed before trial 1.** A passing data set cannot tell you its ICC: with zero drops there is no variation to estimate it from. A pilot could measure the ICC of catch time. If catch times are normal (ASSUMPTION), a catch-time ICC of 0.25, 0.5, 0.75 or 0.9 gives a drop ICC of 0.08, 0.20, 0.41 or 0.62 at 5 %.
 2. **Above an ICC of 0.5104, its 330 trials are worth fewer than 59 independent ones, and the false-pass chance at a true 5 % goes over 5 %:**
 
@@ -290,11 +290,11 @@ Chosen design and the allowed-drop sizes (independent trials, one per subject):
 |---|---|---|---|---|
 | 20 % (FC low) | 1.9e-06 | 2.4e-08 | 4.9e-10 | 5.0 |
 | 33 % (FC high) | 5.5e-11 | 3.1e-15 | 5.2e-19 | 3.0 |
-| 48 % (window (b) edge) | 1.8e-17 | 3.6e-25 | 4.5e-32 | 2.1 |
+| 47.95 % (window (b) edge) | 1.8e-17 | 3.6e-25 | 4.5e-32 | 2.1 |
 
 Rejected clustered designs, subjects inflated for the ICC (m = 10). "Best case" is the mix of subjects most favourable to passing:
 
-| SYNTHETIC: ICC | Subjects (trials) | 20 %: beta-binomial / best case | 33 %: beta-binomial / best case | 48 %: beta-binomial / best case |
+| SYNTHETIC: ICC | Subjects (trials) | 20 %: beta-binomial / best case | 33 %: beta-binomial / best case | 47.95 %: beta-binomial / best case |
 |---|---|---|---|---|
 | 0 | 6 (60) | 1.5e-06 / 1.5e-06 | 3.7e-11 / 3.7e-11 | 9.6e-18 / 9.6e-18 |
 | 0.05 | 9 (90) | 9.5e-08 / 1.2e-06 | 4.1e-13 / 1.2e-09 | 2.1e-20 / 2.9e-12 |
@@ -349,7 +349,7 @@ Rejected clustered designs, subjects inflated for the ICC (m = 10). "Best case" 
 | Dummy | **mass, inertia and gravity-moment calibration records** (before and after each day), the matrix cell and the model crossing it is compared with |
 | Outcome | DROP / NO DROP / INVALID, reason, who decided and when, blinding flag, adverse event, comfort report |
 
-All rig channels are logged at 15 kHz or faster (the budget in section 3; one sample every 0.0667 ms, SYNTHETIC). The 150 Hz IMU has one sample every 6.7 ms and cannot score the criterion; it is logged only as a cross-check at the repo defaults. Raw data are kept. Nothing is deleted.
+All rig channels are logged at 15 kHz or faster (the budget in section 3; one sample every 0.0667 ms, SYNTHETIC). The 150 Hz IMU has one sample every 6.7 ms and cannot score the criterion; it is logged only as a cross-check at the repo defaults. Raw data are kept. Nothing is deleted. Logged data rate (SYNTHETIC; ASSUMPTION A21): 14 rig channels at 15 kHz with 4-byte samples is 0.84 MB/s, or 8.4 MB for a 10 s trial record.
 
 ## 8. Assumptions (unsourced unless stated)
 
@@ -375,6 +375,7 @@ All rig channels are logged at 15 kHz or faster (the budget in section 3; one sa
 | A18 | Rig: stop at 15° with a 10° stroke, upper stop at +15°, contact radius 0.20 m, clearance 25 mm, absorber peak 1.5 × the ideal force, torque trip 10 % over k·T0, device-at-cap runaway case (HE) |
 | A19 | **Firmware test mode** that sets ramp 21.00 N·m/s and STO 148 ms without changing the fault path. Open risk: **must be verified** |
 | A20 | Encoder bandwidth from the first-order rise-time rule, bandwidth = 0.35 / rise time, with the encoder-latency share as the rise time (HE's method) |
+| A21 | (SYNTHETIC) Data rate: 14 rig channels (FC's count of the channels named in section 7), 4 bytes per sample, a 10 s record. Not HE's figure |
 
 ## 9. Open items
 
@@ -385,7 +386,7 @@ All rig channels are logged at 15 kHz or faster (the budget in section 3; one sa
 5. HE: allowed ramp and STO overshoot on the rig; latch design and whether the release skew can be met; absorber proof on the dummy; bandwidth for the torque and force channels. Rev U row 14 still says the window is recomputed per hold torque and asks for 10 trials per subject; both differ from Charlie's decisions.
 6. HE / firmware: **the test mode (A19) must be verified**: ramp 21.00 N·m/s and STO 148 ms delivered as set, fault path unchanged.
 7. Before Phase B: name the stop holder (IRB protocol) and fit the subject stop button.
-8. IRB: criteria, consent (what the subject is told about releases), adverse events, rest times, sham ratio.
+8. IRB: criteria, consent (what the subject is told about releases), adverse events, rest times. The sham schedule is set in Phase B step 4 (ASSUMPTION) and left open in item 9.
 9. Charlie / FC: sham schedule (Phase B step 4) and its cue risk (A11). Zero shams (every subject fault-only) is the other option: it removes the sham cue. Outcomes by schedule are reported descriptively; they do not change the pass rule. Not decided here.
 
 ## References

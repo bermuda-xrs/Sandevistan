@@ -252,15 +252,16 @@ only (synthetic; `scripts/dataset_rates_check.py`, part 1, with the current `See
 `tests/test_dataset_rates.py` guards 1000/125 and 2048/125. The detectors take `fs` from each `Trial`.
 The EMG band's upper edge is capped at 0.45 * fs, so it stays 20-450 Hz down to 1000 Hz. Below that
 the band narrows and the leads can be badly wrong, with no error: on a 2x1x3 run (seed 0, mean true
-lead 91.6 ms) the mean measured lead is 88.3 ms at 2000 Hz, 111.7 ms at 100 Hz, 213.1 ms at 50 Hz
+lead 91.6 ms) the pooled mean lead (the mean of the subject means, as in `summary.json`) is 88.3 ms at 2000 Hz, 111.7 ms at 100 Hz, 213.1 ms at 50 Hz
 (1 of 6 trials missed) and 328.2 ms at 45 Hz (synthetic; same script, part 2). Nothing below 1000 Hz
 is tested for accuracy. The IMU rate has the same gap: only 125 and 150 Hz are tested, but any `--fs-imu`
-above 20 Hz runs with exit 0. On the same 2x1x3 run the mean measured lead is 88.3 ms at 150 Hz, 86.9 ms
-at 50 Hz, 81.1 ms at 25 Hz and 82.6 ms at 20.5 Hz (mean true lead 91.6 ms; no trial missed; synthetic;
+above 20 Hz runs with exit 0. On the same 2x1x3 run the pooled mean lead is 88.3 ms at 150 Hz, 86.9 ms
+at 50 Hz, 81.1 ms at 25 Hz, 82.6 ms at 20.5 Hz and 75.2 ms at 20.001 Hz (mean true lead 91.6 ms; no trial missed; synthetic;
 `scripts/dataset_rates_check.py`, part 4). The error against the true lead is -3.3 ms at 150 Hz, -10.5 ms
-at 25 Hz and -9.0 ms at 20.5 Hz. This is six trials, so it shows that the lead can shift, not by how much.
-IMU rates below 125 Hz are untested for accuracy. A rate too low for the default EMG band (below about 44.4 Hz) or the IMU smoothing
-(20 Hz or less) raises a `ValueError`; in the CLI it is an argparse error (exit 2).
+at 25 Hz, -9.0 ms at 20.5 Hz and -16.4 ms at 20.001 Hz, just above the 20 Hz limit. This is six trials, so it shows that the lead can shift, not by how much.
+IMU rates below 125 Hz are untested for accuracy. A rate too low for the default EMG band (at or below 400/9, about 44.44 Hz) or the IMU smoothing
+(20 Hz or less) raises a `ValueError`; in the CLI it is an argparse error (exit 2). In the Python API the
+`ValueError` comes when `Harness.run` builds the detectors, not when `SyntheticSource` is constructed.
 
 ## Output
 `trials.csv`: `subject_id, session_id, trial_id, emg_onset_s, imu_onset_s, lead_ms, margin_ms,

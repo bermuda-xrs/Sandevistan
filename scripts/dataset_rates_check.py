@@ -14,8 +14,9 @@ README "Sample rates are parameters". No recorded EMG or motion is read. Three p
    4x3x6 trials, both sources) at 2000/150, 1000/125 and 2048/125 Hz: mean error, per-trial SD, misses.
 
 4. CLI at low IMU rates: the same run (``--subjects 2 --sessions 1 --trials 3``, seed 0, EMG left at
-   2000 Hz) at ``--fs-imu`` 150 / 125 / 100 / 50 / 25 / 20.5. The IMU smoothing needs ``fs_imu`` above
-   20 Hz, so these all run with exit 0; the pooled mean lead and misses are printed next to the true lead.
+   2000 Hz) at ``--fs-imu`` 150 / 125 / 100 / 50 / 25 / 20.5 / 20.001. The IMU smoothing needs
+   ``fs_imu`` above 20 Hz, so these all run with exit 0; the pooled mean lead and misses are printed next
+   to the true lead.
 
 Usage (repo root):  python scripts/dataset_rates_check.py [--procs 2] [--parts 1 2 3] [--out results.md]
 """
@@ -46,7 +47,7 @@ BASE = (2000.0, 150.0)
 RATES = [(1000.0, 125.0), (2048.0, 125.0), (2000.0, 125.0), (1000.0, 150.0)]
 SOURCES = {"SyntheticSource": SyntheticSource, "MinJerkSource": MinJerkSource}
 LOW_EMG = [2000.0, 100.0, 50.0, 45.0]
-LOW_IMU = [150.0, 125.0, 100.0, 50.0, 25.0, 20.5]
+LOW_IMU = [150.0, 125.0, 100.0, 50.0, 25.0, 20.5, 20.001]
 
 
 def _errors(job):

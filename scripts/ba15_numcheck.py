@@ -43,6 +43,9 @@ K_HI, T0_DEV = 1.5862286754583168, 6.304261267443454  # exo/benchC_rules_out.jso
 DROP_LIM, CATCH_MS, STOP_DEG = 10.0, 200.0, 15.0
 T_DET = {"estop": 0.0, "comm": 3.0, "emg": 50.0}  # ms
 STO = {"estop": (148.0, 150.0, 160.0), "comm": (142.0, 150.0, 160.0), "emg": (None,)}
+# Logged data rate (ASSUMPTION, not HE's): 14 rig channels (FC's count from section 7), 4-byte
+# samples, 10 s record.
+DATA_CHANNELS, DATA_BYTES, DATA_TRIAL_S = 14, 4, 10
 RATE = {"b": {"estop": 20.0, "comm": 20.0, "emg": 50.0}, "iv": {"estop": 19.0, "comm": 19.0}}
 TOL = 0.05
 G_UNC = 0.05  # subject gravity moment known to +-5 % (ASSUMPTION, HE)
@@ -249,6 +252,10 @@ def hardware(grid, mod) -> dict:
     bud["ok"] = bool(bud["u_t_ms"] <= B)
     bud["ang_unc_deg"] = enc_res + w200_max * (bud["u_t_ms"] - ang_t) / 1e3
     bud["t10_min_pass_ms"] = CATCH_MS + bud["u_t_ms"]
+    # logged data rate (ASSUMPTION: channel count and sample size; FC's count of the channels in section 7)
+    bud["data_channels"], bud["data_bytes"], bud["data_trial_s"] = DATA_CHANNELS, DATA_BYTES, DATA_TRIAL_S
+    bud["data_mb_s"] = DATA_CHANNELS * fs * 1e3 * DATA_BYTES / 1e6
+    bud["data_mb_trial"] = bud["data_mb_s"] * DATA_TRIAL_S
     bud["drop200_max_pass_deg"] = DROP_LIM - bud["ang_unc_deg"]
     bud["worst_drop200_deg"] = max(v["drop200"] for v in grid.values())
     # dummy matrix
@@ -518,6 +525,12 @@ def stats() -> dict:
     return out
 
 
+def _plab(name, p) -> str:
+    """Row label for a true drop probability: whole percent, but two decimals for the window-edge row
+    (47.95 %, not 48 %; FC PR #9 round-2 nit)."""
+    return f"{100 * p:.2f}" if name.startswith("window") else f"{100 * p:.0f}"
+
+
 # ---------------------------------------------------------------- feasibility (SYNTHETIC)
 def feasibility(mod, hw) -> dict:
     ps = {"FC low": FC_P[0], "FC high": FC_P[1], "window (b) edge": mod["p_lo_same_mean"]}
@@ -564,8 +577,10 @@ def feasibility(mod, hw) -> dict:
         pc_gov = float(norm.sf(rg["t_stop_gov"], mu, sd))
         pc_first = float(norm.sf(rg["t_stop_min"], mu, sd))
         pd = float(norm.sf(mod["lo"], mu, sd))  # any DROP (catch after the (b) edge) halts the study
+        pd_ut = float(norm.sf(mod["lo"] - hw["budget"]["u_t_ms"], mu, sd))  # DROP rule: t_c + U_t > edge
         out["contact"][lab] = dict(mean=mu, p_contact_gov=pc_gov, p_contact_first15=pc_first, p_drop=pd,
-                                   p_study_contact=pc_gov / pd * (1 - (1 - pd) ** N0))
+                                   p_study_contact=pc_gov / pd * (1 - (1 - pd) ** N0),
+                                   p_study_contact_ut=pc_gov / pd_ut * (1 - (1 - pd_ut) ** N0))
     out["first_drop"] = {k: 1 / p for k, p in ps.items()}
     out["drop_in_10"] = {k: 1 - (1 - p) ** 10 for k, p in ps.items()}
     out["drop_in_10_icc"] = {k: 1 - float(pmf_bb(p, ICC_ALT, 10, 0)[0]) for k, p in ps.items()}
@@ -641,10 +656,10 @@ def tables(R) -> dict:
     t["oc"] += [f"| {100 * r['p']:g} % | " + " | ".join(_pct(x) for x in r["P"]) + " |" for r in st["oc"]]
     t["feas"] = ["| SYNTHETIC true drop probability | c = 0, n = %d (chosen) | c = 1, n = %d | c = 2, n = %d "
                  "| Mean subjects to first drop |" % (st["n0"], st["n1"], st["n2"]), "|---" * 5 + "|"]
-    t["feas"] += [f"| {100 * p:.0f} % ({k}) | " + " | ".join(f"{x:.1e}" for x in f["indep"][k])
+    t["feas"] += [f"| {_plab(k, p)} % ({k}) | " + " | ".join(f"{x:.1e}" for x in f["indep"][k])
                   + f" | {f['first_drop'][k]:.1f} |" for k, p in f["ps"].items()]
     t["feas_icc"] = ["| SYNTHETIC: ICC | Subjects (trials) | " + " | ".join(
-        f"{100 * p:.0f} %: beta-binomial / best case" for p in f["ps"].values()) + " |",
+        f"{_plab(k, p)} %: beta-binomial / best case" for k, p in f["ps"].items()) + " |",
         "|---" * (2 + len(f["ps"])) + "|"]
     t["feas_icc"] += [f"| {r} | {v0['subjects']} ({v0['subjects'] * M_ALT}) | " + " | ".join(
         f"{f['clustered'][f'{k}|{r}']['bb']:.1e} / {f['clustered'][f'{k}|{r}']['two']:.1e}"

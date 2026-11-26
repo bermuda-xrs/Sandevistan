@@ -75,26 +75,34 @@ PLAT_B = slice((PLAT.start + PLAT.stop) // 2, PLAT.stop)
 #   (max 0.081 over 4000 runs), so normal runs stay valid. It cannot catch slow first-order tails (drift
 #   < 0.04): see the spec (docs/t10-assist-arrived.md) for the measured bias that remains.
 # QUIET_TOL (FC #12/#13): |trace at the T0 sample - baseline mean| <= 10 % of the step. A causal chain has
-#   not moved yet at T0, so a larger offset means the torque started before T0 (a rise that begins 30 ms
-#   early gives t50 21.5 ms instead of about 50), or the baseline is drifting or has a spike on that
-#   sample (random-walk noise, FC #11). On the synthetic runs the offset is at most 0.050 of the step
-#   (5 % sensor noise), so 10 % keeps 2x headroom. The sample noise is not scaled: a run whose step is
-#   only about 10-20 baseline SDs can be INVALID on this check by noise alone (INVALID is not FAIL:
-#   repeat the run with more repeats). Measured on the synthetic chain, no assist-side change: 0/300
-#   INVALID at 10 % per-trial sensor noise (FC's own draws: 1/300), 42/300 at 20 % with 10 repeats and
-#   6/300 (FC: 7/300) with 20 repeats (SYNTHETIC; 0/300 for all of them on the guard before this check).
+#   not moved yet at T0, so a larger offset means the torque started before T0 (a ramp that starts 30 ms
+#   before T0 reaches half of its final value about 20 ms after T0), or the baseline is drifting or has a
+#   spike on that sample (random-walk noise, FC #11). The check rejects timing that is not causal from T0;
+#   it is not a correction of an early reading. Clean ramps starting up to 10 ms before T0 stay valid (the
+#   offset is 0.098 of the step), 11 ms and more are INVALID. On the 4000 committed synthetic runs the offset
+#   is at most 0.0485 of the step, so 10 % keeps 2x headroom (work/margins4000.py).
+#   COST: the tolerance is not scaled by the noise, and nor is the crossing-holds check below. Valid runs
+#   with white per-trial sensor noise are INVALID from about 15 % noise (10 repeats: 3.6 % at 15 %, 12.5 % at
+#   20 %, 27.1 % at 25 %; 20 repeats: 0.2 %, 2.6 %, 8.1 %; 0 of 1500 on the guard before, up to 25 %) and
+#   the effect is not confined to step/SD of 10-20: INVALID runs were seen at step/SD up to 31 (SYNTHETIC,
+#   work/fr_sweep.py, 5 seeds x 300 runs per cell; spec table for the full numbers). INVALID is not FAIL:
+#   repeat the run, preferably with 20 repeats. A single-sample glitch above 1.0 x the step in 1 of 10
+#   repeats on the T0 sample alone makes a valid assist INVALID (the sample before or after does not).
 #   ASSUMPTION: the tolerance is an engineering choice.
 # TAIL: the 50 ms after the plateau window (T0 + 550 .. 600 ms, the end of the record). Its mean may differ
-#   from the plateau mean by at most SETTLE_TOL of the step (FC #10: a 60 % step at 551 ms was invisible).
-#   Synthetic runs: at most 0.082 of the step (ripple, as for the plateau halves). A change after T0 + 600 ms
-#   is not recorded and cannot be seen.
+#   from the plateau mean by at most SETTLE_TOL of the step, in both directions (FC #10: a 60 % step at
+#   551 ms was invisible). On the 4000 committed synthetic runs it is at most 0.0908 of the step (ripple, as
+#   for the plateau halves; 1.65x headroom). A change that arrives in the last 5 ms of the record is
+#   invisible (60 % of the step at 594 ms is INVALID, at 595 ms or later PASS), and anything after
+#   T0 + 600 ms is not recorded.
 # CONFIRM_MS, CONFIRM_LEVEL (FC #12): the first sample at or above the t50 threshold counts only if the
 #   median of the next 10 ms is at or above 75 % of the threshold level (base + 0.75 x 0.5 x step). A
 #   one-sample spike in one repeat (8x the step in 1 of 10 repeats gives 0.8 of the step in the mean) has
 #   a median at the baseline, so it is not a crossing. 75 % and not 100 %: a noisy trace that first
 #   touches the threshold early is not rejected (at 100 % about 16 % of runs with 10 % per-trial sensor
 #   noise were INVALID, measured, SYNTHETIC). A spike that sits on a trace already above 37.5 % of the step
-#   can still move t50 earlier, by up to the time the trace needs to climb from 37.5 % to 50 %. A burst
+#   can still move t50 earlier, by up to the time the trace needs to climb from 37.5 % to 50 %: a ramp 40/140
+#   (t50 110 ms, FAIL) with one spike at 90 ms or later reads PASS (work/fix2_probes.py). A burst
 #   of half of CONFIRM_MS (5 ms) or longer is not caught (4 ms is).
 #   Not applied to t10/t90, which never decide pass/fail.
 K_NOISE = 10.0
