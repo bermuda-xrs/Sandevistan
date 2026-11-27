@@ -63,7 +63,7 @@ B-A15 is the project's human catch model: the user arrests the arm at exactly 20
   - The absorber above is sized for the rig, not for a person.
   - In Phase B an uncaught arm reaches the stop at 211 °/s in the test cell (SYNTHETIC). In the runaway case it is 342 °/s, with 84.4 N·m and 422 N at the contact (SYNTHETIC).
   - With the S7 catch model (normal, SD 16 ms), the share of Phase B trials whose catch comes after the test cell's stop contact is 4.34 % (nominal-hold mean) to 6.69 % (zero-hold mean) (SYNTHETIC). FC's 4.53 %–6.96 % uses the earliest contact of any cell (SYNTHETIC).
-  - The stop rules halt at the first DROP, so at most one person hits the stop. But that person still takes it: the chance that the study ends on a stop contact is 9.05 % to 11.86 % (SYNTHETIC).
+  - The stop rules halt at the first DROP, so at most one person hits the stop. But that person still takes it: the chance that the study ends on a stop contact is 9.05 % to 11.86 % when a drop is a catch time later than the window edge, and 8.97 % to 11.77 % when the edge is lowered by U_t, as the DROP rule in section 3 does (SYNTHETIC). Both assume exactly 59 released fault trials: every released INVALID fault trial that step 8 of Phase B replaces with a new subject adds one more exposure that can end on a stop contact.
   - **No sourced limit exists in this plan.** FC notes that ISO/TS 15066 has body-region limits but holds no clause text (`PR9_verdict.md` row 12); the S7 search could not read it either. No other source was found. **No limit is invented here.**
   - **Phase B is blocked until** a sourced human tolerance for this contact (speed, force or energy at the forearm) is in the plan, and the stop is shown on the dummy to stay within it.
 
@@ -160,10 +160,11 @@ B-A15 is the project's human catch model: the user arrests the arm at exactly 20
 1. One test cell only: e-stop fault, ramp 21.00 N·m/s, STO 148 ms, relaxed hold. It has the earliest model crossing, so a given catch time is hardest to pass there (ASSUMPTION: a subject's catch time does not depend on which path failed). **A pass covers only the cell tested.** To claim each path separately, each needs its own full sample.
 2. Seat the subject, elbow at 90°, payload in hand, forearm resting on the start latch. A relaxed arm would sag before the fault, because the device carries slightly less than the arm's weight, so the latch must hold it and release at fault onset (ASSUMPTION: release adds no usable cue).
 3. Tell the subject to relax and to stop the arm only if it falls. Use no countdown and mask sound.
-4. Random wait of 1 to 4 s before onset, as in [PRU09]. Mix in sham releases (latch opens, no fault) at random, one sham per fault trial (ASSUMPTION). A relaxed arm still sags slowly in a sham, so shams are never scored.
+4. Random wait of 1 to 4 s before onset, as in [PRU09]. A sham is a release where the latch opens and no fault follows. Sham scheduling is fixed before trial 1 (ASSUMPTION, a design choice, not a computed number): before the session each subject is randomised, with equal chance, to one of two schedules, **fault only** (the fault is the subject's first release) or **one sham, then the fault**. A sham is always before the fault, never after it. The subject is not told how many releases to expect or in which order. A relaxed arm still sags slowly in a sham, so shams are never scored.
 5. Fault onset is time zero. The catch time is from onset to arrest complete (arm speed zero), as in Rev U row 14.
-6. **One fault trial per subject** (Charlie's design), with the shams mixed in before and after it. Then the subject's session ends.
+6. **One fault trial per subject** (Charlie's design). The session ends right after the fault trial and the check on the subject, so nothing is released after it: no sham follows the fault trial.
 7. No practice with the real fault. The unprepared user is the hazard, and [PRU09] subjects were practised. With one fault trial per subject, every fault is a first exposure.
+8. **Re-running an INVALID trial** (this keeps the one-fault rule and the first-exposure basis). A trial found INVALID **before** the release, when nothing was released, may be restarted on the same subject, who is still unexposed. An INVALID **fault** trial where the latch was released is **not repeated on that subject**: a second fault would not be a first exposure and would make that subject two trials, which the ICC-free basis of section 4 does not cover. The subject is closed, the trial is not counted, and a new subject is enrolled in their place, so that the plan ends with 59 valid first-exposure fault trials. An INVALID sham is not repeated and the subject goes on to the fault. Every INVALID trial and every replacement is reported. The replacement is not chosen after seeing the angle trace, because INVALID is decided without it (see the score rules). A drop in an INVALID trial is not removed: the stop rules and the zero-drop failure rule still apply.
 
 **Trial score (fixed before trial 1).** Let t_c be the measured catch time and U_t the measured timing uncertainty.
 
@@ -175,7 +176,7 @@ B-A15 is the project's human catch model: the user arrests the arm at exactly 20
 
 - Using both time and angle makes the score stricter than either alone, so a pass holds for both readings of "drop past 10°" (ASSUMPTION: this is how 1a and 2b combine; for FC and Charlie to confirm).
 - Not relaxed means the repo EMG onset detector, at its unchanged defaults, fires during the wait (ASSUMPTION).
-- INVALID is decided from pre-onset and rig channels only, by someone who has not seen the angle trace after onset. Invalid trials are repeated and all are reported. **A drop in an invalid trial still triggers the stop rules.**
+- INVALID is decided from pre-onset and rig channels only, by someone who has not seen the angle trace after onset. An INVALID trial is not counted. It is re-run or replaced as in Phase B step 8, never repeated as a second fault on the same subject, and all are reported. **A drop in an invalid trial still triggers the stop rules.**
 - The rig may not be easier than the cell. Going past it by one percent in ramp rate moves the crossing -0.39 ms, and STO one ms early moves it -0.29 ms (SYNTHETIC). The allowed overshoot is open.
 
 ## 4. Sample size
@@ -200,7 +201,7 @@ B-A15 is the project's human catch model: the user arrests the arm at exactly 20
 
 ## 4b. Rejected alternatives
 
-**33 subjects × 10 fault trials (the earlier planning default, DE 5.5, 330 fault trials). Rejected by Charlie, 2026-11-26.** Reasons:
+**33 subjects × 10 fault trials (the earlier planning default, DE 5.5, 330 fault trials). Not chosen: Charlie chose 59 × one (2026-11-26 01:25 KST, relayed by Seren; the rejection of this default is read from that choice, not a separate statement).** Reasons:
 1. **It is only valid if the drop ICC is at most 0.5, and that ICC must be fixed before trial 1.** A passing data set cannot tell you its ICC: with zero drops there is no variation to estimate it from. A pilot could measure the ICC of catch time. If catch times are normal (ASSUMPTION), a catch-time ICC of 0.25, 0.5, 0.75 or 0.9 gives a drop ICC of 0.08, 0.20, 0.41 or 0.62 at 5 %.
 2. **Above an ICC of 0.5104, its 330 trials are worth fewer than 59 independent ones, and the false-pass chance at a true 5 % goes over 5 %:**
 
@@ -289,11 +290,11 @@ Chosen design and the allowed-drop sizes (independent trials, one per subject):
 |---|---|---|---|---|
 | 20 % (FC low) | 1.9e-06 | 2.4e-08 | 4.9e-10 | 5.0 |
 | 33 % (FC high) | 5.5e-11 | 3.1e-15 | 5.2e-19 | 3.0 |
-| 48 % (window (b) edge) | 1.8e-17 | 3.6e-25 | 4.5e-32 | 2.1 |
+| 47.95 % (window (b) edge) | 1.8e-17 | 3.6e-25 | 4.5e-32 | 2.1 |
 
 Rejected clustered designs, subjects inflated for the ICC (m = 10). "Best case" is the mix of subjects most favourable to passing:
 
-| SYNTHETIC: ICC | Subjects (trials) | 20 %: beta-binomial / best case | 33 %: beta-binomial / best case | 48 %: beta-binomial / best case |
+| SYNTHETIC: ICC | Subjects (trials) | 20 %: beta-binomial / best case | 33 %: beta-binomial / best case | 47.95 %: beta-binomial / best case |
 |---|---|---|---|---|
 | 0 | 6 (60) | 1.5e-06 / 1.5e-06 | 3.7e-11 / 3.7e-11 | 9.6e-18 / 9.6e-18 |
 | 0.05 | 9 (90) | 9.5e-08 / 1.2e-06 | 4.1e-13 / 1.2e-09 | 2.1e-20 / 2.9e-12 |
@@ -337,7 +338,7 @@ Rejected clustered designs, subjects inflated for the ICC (m = 10). "Best case" 
 
 | Group | Channels |
 |---|---|
-| Identity | coded subject, session, trial number, fault or sham, random wait, test cell, operator, firmware commit, plan version |
+| Identity | coded subject, session, trial number, fault or sham, assigned sham schedule, random wait, test cell, operator, firmware commit, plan version |
 | Commands | ramp rate and STO time commanded **and measured as delivered** (firmware test mode), fault-onset trigger, latch-release time |
 | Torque | commanded and measured joint torque (device side), arm-side torque at the cuff, k used, torque-trip state |
 | Hold | latch load before release (arm side), payload mass, subject arm mass estimate |
@@ -348,7 +349,7 @@ Rejected clustered designs, subjects inflated for the ICC (m = 10). "Best case" 
 | Dummy | **mass, inertia and gravity-moment calibration records** (before and after each day), the matrix cell and the model crossing it is compared with |
 | Outcome | DROP / NO DROP / INVALID, reason, who decided and when, blinding flag, adverse event, comfort report |
 
-All rig channels are logged at 15 kHz or faster (the budget in section 3; one sample every 0.0667 ms, SYNTHETIC). The 150 Hz IMU has one sample every 6.7 ms and cannot score the criterion; it is logged only as a cross-check at the repo defaults. Raw data are kept. Nothing is deleted.
+All rig channels are logged at 15 kHz or faster (the budget in section 3; one sample every 0.0667 ms, SYNTHETIC). The 150 Hz IMU has one sample every 6.7 ms and cannot score the criterion; it is logged only as a cross-check at the repo defaults. Raw data are kept. Nothing is deleted. Logged data rate (SYNTHETIC; ASSUMPTION A21): 14 rig channels at 15 kHz with 4-byte samples is 0.84 MB/s, or 8.4 MB for a 10 s trial record.
 
 ## 8. Assumptions (unsourced unless stated)
 
@@ -364,7 +365,7 @@ All rig channels are logged at 15 kHz or faster (the budget in section 3; one sa
 | A8 | Testing only the governing cell is enough; catch time does not depend on the path |
 | A9 | Score combines catch time and angle, with uncertainty added against a pass |
 | A10 | Subject gravity moment known to ±5 % (HE scoping) |
-| A11 | Latch release and shams give no usable cue; one sham per fault trial |
+| A11 | Latch release and shams give no usable cue. Weaker under 59 × one: with the sham-then-fault schedule a subject who works out that the second release is real is prepared, which (ASSUMPTION) makes a drop less likely and so favours a false pass. Not tested; open item 9 |
 | A12 | "Relaxed" means the EMG onset detector at unchanged defaults stays silent |
 | A13 | (SYNTHETIC) FC's 20 %–33 %: linear extrapolation of [PRU09], normal catch times, SD 16 ms, ± read as SD |
 | A14 | [PRU09] transfers to this task (step torque, horizontal plane, practised subjects there; ramp, vertical, unprepared here) |
@@ -374,6 +375,7 @@ All rig channels are logged at 15 kHz or faster (the budget in section 3; one sa
 | A18 | Rig: stop at 15° with a 10° stroke, upper stop at +15°, contact radius 0.20 m, clearance 25 mm, absorber peak 1.5 × the ideal force, torque trip 10 % over k·T0, device-at-cap runaway case (HE) |
 | A19 | **Firmware test mode** that sets ramp 21.00 N·m/s and STO 148 ms without changing the fault path. Open risk: **must be verified** |
 | A20 | Encoder bandwidth from the first-order rise-time rule, bandwidth = 0.35 / rise time, with the encoder-latency share as the rise time (HE's method) |
+| A21 | (SYNTHETIC) Data rate: 14 rig channels (FC's count of the channels named in section 7), 4 bytes per sample, a 10 s record. Not HE's figure |
 
 ## 9. Open items
 
@@ -384,7 +386,8 @@ All rig channels are logged at 15 kHz or faster (the budget in section 3; one sa
 5. HE: allowed ramp and STO overshoot on the rig; latch design and whether the release skew can be met; absorber proof on the dummy; bandwidth for the torque and force channels. Rev U row 14 still says the window is recomputed per hold torque and asks for 10 trials per subject; both differ from Charlie's decisions.
 6. HE / firmware: **the test mode (A19) must be verified**: ramp 21.00 N·m/s and STO 148 ms delivered as set, fault path unchanged.
 7. Before Phase B: name the stop holder (IRB protocol) and fit the subject stop button.
-8. IRB: criteria, consent, adverse events, rest times, sham ratio.
+8. IRB: criteria, consent (what the subject is told about releases), adverse events, rest times. The sham schedule is set in Phase B step 4 (ASSUMPTION) and left open in item 9.
+9. Charlie / FC: sham schedule (Phase B step 4) and its cue risk (A11). Zero shams (every subject fault-only) is the other option: it removes the sham cue. Outcomes by schedule are reported descriptively; they do not change the pass rule. Not decided here.
 
 ## References
 

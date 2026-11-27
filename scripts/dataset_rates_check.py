@@ -13,6 +13,11 @@ README "Sample rates are parameters". No recorded EMG or motion is read. Three p
 3. The draws of ``tests/test_dataset_rates.py::test_lead_accuracy_at_dataset_rates`` (seeds 0 and 1,
    4x3x6 trials, both sources) at 2000/150, 1000/125 and 2048/125 Hz: mean error, per-trial SD, misses.
 
+4. CLI at low IMU rates: the same run (``--subjects 2 --sessions 1 --trials 3``, seed 0, EMG left at
+   2000 Hz) at ``--fs-imu`` 150 / 125 / 100 / 50 / 25 / 20.5 / 20.001. The IMU smoothing needs
+   ``fs_imu`` above 20 Hz, so these all run with exit 0; the pooled mean lead and misses are printed next
+   to the true lead.
+
 Usage (repo root):  python scripts/dataset_rates_check.py [--procs 2] [--parts 1 2 3] [--out results.md]
 """
 
@@ -42,6 +47,7 @@ BASE = (2000.0, 150.0)
 RATES = [(1000.0, 125.0), (2048.0, 125.0), (2000.0, 125.0), (1000.0, 150.0)]
 SOURCES = {"SyntheticSource": SyntheticSource, "MinJerkSource": MinJerkSource}
 LOW_EMG = [2000.0, 100.0, 50.0, 45.0]
+LOW_IMU = [150.0, 125.0, 100.0, 50.0, 25.0, 20.5, 20.001]
 
 
 def _errors(job):
@@ -86,14 +92,14 @@ def paired_table(procs: int) -> list[str]:
     return out
 
 
-def low_rate_cli() -> list[str]:
-    out = ["| --fs-emg (Hz) | exit | pooled mean lead (ms) | mean true lead, all trials (ms) | "
+def low_rate_cli(flag: str = "--fs-emg", rates: list[float] = LOW_EMG) -> list[str]:
+    out = [f"| {flag} (Hz) | exit | pooled mean lead (ms) | mean true lead, all trials (ms) | "
            "missed / trials |",
            "|---|---|---|---|---|"]
-    for fe in LOW_EMG:
+    for fe in rates:
         with tempfile.TemporaryDirectory() as d, contextlib.redirect_stdout(io.StringIO()):
             rc = cli_main(["run", "--synthetic", "--subjects", "2", "--sessions", "1", "--trials", "3",
-                           "--fs-emg", f"{fe:g}", "--out", d])
+                           flag, f"{fe:g}", "--out", d])
             p = json.loads((Path(d) / "summary.json").read_text())["pooled"]
             with open(Path(d) / "trials.csv", newline="") as f:
                 true = np.mean([float(r["true_lead_ms"]) for r in csv.DictReader(f)])
@@ -118,7 +124,7 @@ def suite_seed_draws() -> list[str]:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--procs", type=int, default=1)
-    ap.add_argument("--parts", type=int, nargs="+", default=[1, 2, 3], choices=[1, 2, 3])
+    ap.add_argument("--parts", type=int, nargs="+", default=[1, 2, 3, 4], choices=[1, 2, 3, 4])
     ap.add_argument("--out", type=Path, default=None)
     a = ap.parse_args()
     lines = ["# Dataset sample rates (SYNTHETIC)", ""]
@@ -129,6 +135,9 @@ def main() -> None:
         lines += ["## 2. CLI at low EMG rates, 2x1x3 trials, seed 0", "", *low_rate_cli(), ""]
     if 3 in a.parts:
         lines += ["## 3. Test-suite draws, seeds 0-1, 4x3x6 trials", "", *suite_seed_draws(), ""]
+    if 4 in a.parts:
+        lines += ["## 4. CLI at low IMU rates, 2x1x3 trials, seed 0", "",
+                  *low_rate_cli("--fs-imu", LOW_IMU), ""]
     text = "\n".join(lines)
     print(text)
     if a.out:

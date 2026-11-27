@@ -184,8 +184,8 @@ def test_every_draw_comes_from_a_recorded_stream(cls, monkeypatch):
 
     This test is deliberately brittle. It counts only values drawn with ``normal`` or ``uniform`` from
     generators made by ``np.random.default_rng``, so it also fails for a correct change that
-    - builds generators another way (``np.random.Generator(np.random.PCG64(seed))``, a spawned
-      ``SeedSequence`` passed to ``Generator``), or
+    - builds generators another way (``np.random.Generator(np.random.PCG64(seed))``, or
+      ``np.random.Generator(np.random.PCG64(ss))`` with a spawned ``SeedSequence`` ``ss``), or
     - draws with another method (``standard_normal``, ``random``, ``integers``), or
     - draws a different number of values (a new noise channel, a new per-trial parameter).
     That is accepted, because it is the only guard against draws that bypass the recorded

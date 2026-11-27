@@ -15,6 +15,11 @@ t10_criterion.md/.json.
 VALIDITY GUARD (FC PR #13 items #8/#9): a run is INVALID, so not passed, unless the ensemble-mean step is
 positive, larger than K_NOISE x the baseline SD and larger than MIN_STEP, the t50 crossing is strictly after
 T0, and the trace has settled by T0 + 350 ms (plateau drift within SETTLE_TOL of the step). See ``guard``.
+VALIDITY GUARD, round 2 (FC PR #13 round-2 items #10-#13): three more INVALID conditions. The trace is
+still at its baseline on the T0 sample (within QUIET_TOL of the step: no rise before T0, no drift, no
+spike); the last 50 ms of the record (after the plateau window) agree with the plateau (within
+SETTLE_TOL of the step: no change after T0 + 550 ms); and the t50 crossing holds (the median of the next
+CONFIRM_MS stays above 75 % of the threshold level: a one-sample spike is not a crossing).
 The estimator comparison above and its outputs t10_protocol.md/.json are unchanged (same draws, same numbers).
 Usage: python3 t10_protocol.py <out_dir>
 """
@@ -69,9 +74,44 @@ PLAT_B = slice((PLAT.start + PLAT.stop) // 2, PLAT.stop)
 #   drift 0.67 of the step). 15 % sits above the drift that MAV ripple alone gives on the synthetic chain
 #   (max 0.081 over 4000 runs), so normal runs stay valid. It cannot catch slow first-order tails (drift
 #   < 0.04): see the spec (docs/t10-assist-arrived.md) for the measured bias that remains.
+# QUIET_TOL (FC #12/#13): |trace at the T0 sample - baseline mean| <= 10 % of the step. A causal chain has
+#   not moved yet at T0, so a larger offset means the torque started before T0 (a ramp that starts 30 ms
+#   before T0 reaches half of its final value about 20 ms after T0), or the baseline is drifting or has a
+#   spike on that sample (random-walk noise, FC #11). The check rejects timing that is not causal from T0;
+#   it is not a correction of an early reading. Clean ramps starting up to 10 ms before T0 stay valid (the
+#   offset is 0.098 of the step), 11 ms and more are INVALID. On the 4000 committed synthetic runs the offset
+#   is at most 0.0485 of the step, so 10 % keeps 2x headroom (work/margins4000.py).
+#   COST: the tolerance is not scaled by the noise, and nor is the crossing-holds check below. Valid runs
+#   with white per-trial sensor noise are INVALID from about 15 % noise (10 repeats: 3.6 % at 15 %, 12.5 % at
+#   20 %, 27.1 % at 25 %; 20 repeats: 0.2 %, 2.6 %, 8.1 %; 0 of 1500 on the guard before, up to 25 %) and
+#   the effect is not confined to step/SD of 10-20: INVALID runs were seen at step/SD up to 31 (SYNTHETIC,
+#   work/fr_sweep.py, 5 seeds x 300 runs per cell; spec table for the full numbers). INVALID is not FAIL:
+#   repeat the run, preferably with 20 repeats. A single-sample glitch above 1.0 x the step in 1 of 10
+#   repeats on the T0 sample alone makes a valid assist INVALID (the sample before or after does not).
+#   ASSUMPTION: the tolerance is an engineering choice.
+# TAIL: the 50 ms after the plateau window (T0 + 550 .. 600 ms, the end of the record). Its mean may differ
+#   from the plateau mean by at most SETTLE_TOL of the step, in both directions (FC #10: a 60 % step at
+#   551 ms was invisible). On the 4000 committed synthetic runs it is at most 0.0908 of the step (ripple, as
+#   for the plateau halves; 1.65x headroom). A change that arrives in the last 5 ms of the record is
+#   invisible (60 % of the step at 594 ms is INVALID, at 595 ms or later PASS), and anything after
+#   T0 + 600 ms is not recorded.
+# CONFIRM_MS, CONFIRM_LEVEL (FC #12): the first sample at or above the t50 threshold counts only if the
+#   median of the next 10 ms is at or above 75 % of the threshold level (base + 0.75 x 0.5 x step). A
+#   one-sample spike in one repeat (8x the step in 1 of 10 repeats gives 0.8 of the step in the mean) has
+#   a median at the baseline, so it is not a crossing. 75 % and not 100 %: a noisy trace that first
+#   touches the threshold early is not rejected (at 100 % about 16 % of runs with 10 % per-trial sensor
+#   noise were INVALID, measured, SYNTHETIC). A spike that sits on a trace already above 37.5 % of the step
+#   can still move t50 earlier, by up to the time the trace needs to climb from 37.5 % to 50 %: a ramp 40/140
+#   (t50 110 ms, FAIL) with one spike at 90 ms or later reads PASS (work/fix2_probes.py). A burst
+#   of half of CONFIRM_MS (5 ms) or longer is not caught (4 ms is).
+#   Not applied to t10/t90, which never decide pass/fail.
 K_NOISE = 10.0
 MIN_STEP = 0.5
 SETTLE_TOL = 0.15
+QUIET_TOL = 0.10
+TAIL = slice(PLAT.stop, None)
+CONFIRM_MS = 10.0
+CONFIRM_LEVEL = 0.75
 
 
 def crossing(y, frac):
@@ -87,12 +127,27 @@ def t50(y):
     return crossing(y, 0.5)
 
 
+def crossing_confirmed(y, frac=0.5):
+    """True per row if the first crossing of base + frac * step holds: the median of the next CONFIRM_MS
+    (from the crossing on) is at or above base + CONFIRM_LEVEL * frac * step. Never crossing: False."""
+    base = y[:, BASE].mean(axis=1)
+    thr = base + frac * (y[:, PLAT].mean(axis=1) - base)
+    level = base + CONFIRM_LEVEL * (thr - base)
+    hit = (y >= thr[:, None]) & (tm >= T0)[None, :]
+    first = hit.argmax(axis=1)
+    w = int(round(CONFIRM_MS / 1e3 * FS))
+    return np.array([hit[i].any() and np.median(y[i, f : f + w]) >= level[i] for i, f in enumerate(first)])
+
+
 def guard(y, min_step=MIN_STEP):
     """Validity of each row (an ensemble-mean trace). Returns step, baseline SD, plateau drift and reasons."""
     base = y[:, BASE].mean(axis=1)
     step = y[:, PLAT].mean(axis=1) - base
     base_sd = y[:, BASE].std(axis=1, ddof=1)
     drift = y[:, PLAT_B].mean(axis=1) - y[:, PLAT_A].mean(axis=1)
+    start = y[:, int(round(T0 * FS))] - base  # offset from the baseline on the T0 sample
+    tail = y[:, TAIL].mean(axis=1) - y[:, PLAT].mean(axis=1)  # record end vs plateau
+    held = crossing_confirmed(y, 0.5)
     tt = {k: crossing(y, f) for k, f in FRACTIONS.items()}
     reasons = [[] for _ in range(len(y))]
     for i in range(len(y)):
@@ -104,9 +159,33 @@ def guard(y, min_step=MIN_STEP):
             reasons[i].append(f"t50 crossing {tt['t50'][i]:.2f} ms is not after T0")
         if not abs(drift[i]) <= SETTLE_TOL * abs(step[i]):
             reasons[i].append(f"not settled by T0+350 ms: drift {drift[i]:.4g} > {SETTLE_TOL:g} x step")
+        if not abs(start[i]) <= QUIET_TOL * abs(step[i]):
+            reasons[i].append(
+                f"not at baseline on the T0 sample: offset {start[i]:.4g} > {QUIET_TOL:g} x step"
+            )
+        if not abs(tail[i]) <= SETTLE_TOL * abs(step[i]):
+            reasons[i].append(
+                f"changes after T0+550 ms: tail {tail[i]:.4g} off the plateau by > {SETTLE_TOL:g} x step"
+            )
+        if not held[i]:
+            reasons[i].append(
+                "t50 crossing does not hold (spike): median of the next {:g} ms is below it".format(
+                    CONFIRM_MS
+                )
+            )
     valid = np.array([not r for r in reasons])
     passed = valid & (tt["t50"] <= T10_PASS_MS)
-    return dict(tt, step=step, base_sd=base_sd, drift=drift, reasons=reasons, valid=valid, passed=passed)
+    return dict(
+        tt,
+        step=step,
+        base_sd=base_sd,
+        drift=drift,
+        start=start,
+        tail=tail,
+        reasons=reasons,
+        valid=valid,
+        passed=passed,
+    )
 
 
 def assist_arrived(torque, min_step=MIN_STEP):
@@ -130,6 +209,8 @@ def assist_arrived(torque, min_step=MIN_STEP):
         step=float(g["step"][0]),
         baseline_sd=float(g["base_sd"][0]),
         plateau_drift=float(g["drift"][0]),
+        start_offset=float(g["start"][0]),
+        tail_drift=float(g["tail"][0]),
     )
 
 

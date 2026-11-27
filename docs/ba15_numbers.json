@@ -951,14 +951,16 @@
      "p_contact_gov": 0.043388094884506546,
      "p_contact_first15": 0.04526919268662099,
      "p_drop": 0.47953702464245723,
-     "p_study_contact": 0.0904791343626839
+     "p_study_contact": 0.0904791343626839,
+     "p_study_contact_ut": 0.08973347736333359
     },
     "zero hold": {
      "mean": 204.5,
      "p_contact_gov": 0.0669184555116223,
      "p_contact_first15": 0.0695632113620425,
      "p_drop": 0.5644246290418442,
-     "p_study_contact": 0.11856048100739636
+     "p_study_contact": 0.11856048100739636,
+     "p_study_contact_ut": 0.11773990268035571
     }
    },
    "first_drop": {
@@ -1010,6 +1012,11 @@
     "ok": true,
     "ang_unc_deg": 0.026270778655533122,
     "t10_min_pass_ms": 200.15998684923622,
+    "data_channels": 14,
+    "data_bytes": 4,
+    "data_trial_s": 10,
+    "data_mb_s": 0.84,
+    "data_mb_trial": 8.4,
     "drop200_max_pass_deg": 9.973729221344467,
     "worst_drop200_deg": 9.688776970044117
    },
